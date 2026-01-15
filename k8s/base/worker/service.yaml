@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker
+  namespace: batchsender
+  labels:
+    app: worker
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 6001
+    name: http
+  selector:
+    app: worker

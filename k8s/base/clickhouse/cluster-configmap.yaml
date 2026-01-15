@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-cluster-config
+  namespace: batchsender
+data:
+  cluster.xml: |
+    <clickhouse>
+        <!-- Cluster definition (single replica for now, add more when scaling) -->
+        <remote_servers>
+            <batchsender_cluster>
+                <shard>
+                    <internal_replication>true</internal_replication>
+                    <replica>
+                        <host>clickhouse-0.clickhouse-headless.batchsender.svc.cluster.local</host>
+                        <port>9000</port>
+                    </replica>
+                    <!-- Add when scaling to 3 replicas:
+                    <replica><host>clickhouse-1.clickhouse-headless.batchsender.svc.cluster.local</host><port>9000</port></replica>
+                    <replica><host>clickhouse-2.clickhouse-headless.batchsender.svc.cluster.local</host><port>9000</port></replica>
+                    -->
+                </shard>
+            </batchsender_cluster>
+        </remote_servers>
+
+        <!-- Use embedded Keeper (single node for now) -->
+        <zookeeper>
+            <node>
+                <host>clickhouse-0.clickhouse-headless.batchsender.svc.cluster.local</host>
+                <port>9181</port>
+            </node>
+            <!-- Add when scaling to 3 replicas:
+            <node><host>clickhouse-1.clickhouse-headless.batchsender.svc.cluster.local</host><port>9181</port></node>
+            <node><host>clickhouse-2.clickhouse-headless.batchsender.svc.cluster.local</host><port>9181</port></node>
+            -->
+        </zookeeper>
+
+        <!-- Macros for replica identification -->
+        <macros>
+            <cluster>batchsender_cluster</cluster>
+            <shard>01</shard>
+            <replica from_env="HOSTNAME"/>
+        </macros>
+
+        <!-- Distributed DDL -->
+        <distributed_ddl>
+            <path>/clickhouse/task_queue/ddl</path>
+        </distributed_ddl>
+    </clickhouse>
+
+  # Resource limits and performance tuning
+  users.xml: |
+    <clickhouse>
+        <profiles>
+            <default>
+                <!-- Memory limits per query (scale up when needed) -->
+                <max_memory_usage>2000000000</max_memory_usage>  <!-- 2GB per query -->
+                <max_memory_usage_for_user>3000000000</max_memory_usage_for_user>  <!-- 3GB per user -->
+
+                <!-- Burst handling - allow more concurrent queries -->
+                <max_concurrent_queries_for_user>50</max_concurrent_queries_for_user>
+
+                <!-- Async inserts for high throughput -->
+                <async_insert>1</async_insert>
+                <async_insert_max_data_size>10000000</async_insert_max_data_size>  <!-- 10MB -->
+                <async_insert_busy_timeout_ms>200</async_insert_busy_timeout_ms>
+                <wait_for_async_insert>0</wait_for_async_insert>
+
+                <!-- Query performance -->
+                <max_threads>2</max_threads>
+                <max_insert_threads>2</max_insert_threads>
+            </default>
+        </profiles>
+
+        <quotas>
+            <default>
+                <interval>
+                    <duration>3600</duration>
+                    <queries>100000</queries>
+                    <errors>1000</errors>
+                    <result_rows>1000000000</result_rows>
+                    <read_rows>10000000000</read_rows>
+                </interval>
+            </default>
+        </quotas>
+    </clickhouse>

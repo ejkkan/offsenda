@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: batchsender
+
+resources:
+  - namespace.yaml
+  # PostgreSQL - For batch metadata storage
+  - postgres/statefulset.yaml
+  - postgres/service.yaml
+  - postgres/init-configmap.yaml
+  # DragonflyDB - For distributed rate limiting
+  - dragonfly/statefulset.yaml
+  - dragonfly/service.yaml
+  - nats/statefulset.yaml
+  - nats/service.yaml
+  - nats/hpa.yaml
+  # ClickHouse cluster (3 replicas)
+  - clickhouse/statefulset.yaml
+  - clickhouse/service.yaml
+  - clickhouse/headless-service.yaml
+  - clickhouse/init-configmap.yaml
+  - clickhouse/sealed-secrets.yaml
+  - clickhouse/sealed-b2-secret.yaml
+  - clickhouse/storage-configmap.yaml
+  - clickhouse/cluster-configmap.yaml
+  - clickhouse/keeper-configmap.yaml
+  - clickhouse/backup-cronjob.yaml
+  - worker/configmap.yaml
+  - worker/sealed-secrets.yaml
+  - worker/deployment.yaml
+  - worker/service.yaml
+  # KEDA ScaledObject for instant autoscaling (replaces HPA)
+  - worker/keda-scaledobject.yaml
+  # worker/hpa.yaml - DISABLED: conflicts with KEDA (only use one or the other)

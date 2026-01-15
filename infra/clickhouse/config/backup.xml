@@ -1,0 +1,6 @@
+<clickhouse>
+    <backups>
+        <allowed_disk>b2_cold</allowed_disk>
+        <allowed_path>/backups/</allowed_path>
+    </backups>
+</clickhouse>

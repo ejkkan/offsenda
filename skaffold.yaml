@@ -1,0 +1,52 @@
+apiVersion: skaffold/v4beta6
+kind: Config
+metadata:
+  name: batchsender
+
+build:
+  local:
+    push: false
+    useBuildkit: true
+  artifacts:
+  - image: worker
+    context: .
+    docker:
+      dockerfile: apps/worker/Dockerfile
+    platforms: ["linux/arm64"]
+    sync:
+      manual:
+      - src: "apps/worker/src/**/*.ts"
+        dest: /app/apps/worker/src
+      - src: "apps/worker/package.json"
+        dest: /app/apps/worker/package.json
+      - src: "packages/db/src/**/*.ts"
+        dest: /app/packages/db/src
+
+deploy:
+  kubectl:
+    defaultNamespace: batchsender
+  logs:
+    prefix: auto
+  statusCheckDeadlineSeconds: 300
+
+manifests:
+  kustomize:
+    paths:
+    - k8s/overlays/local
+
+portForward:
+- resourceType: service
+  resourceName: worker
+  namespace: batchsender
+  port: 80
+  localPort: 6001
+- resourceType: service
+  resourceName: nats
+  namespace: batchsender
+  port: 8222
+  localPort: 8222
+- resourceType: service
+  resourceName: clickhouse
+  namespace: batchsender
+  port: 8123
+  localPort: 8123

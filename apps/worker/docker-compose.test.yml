@@ -1,0 +1,67 @@
+version: "3.8"
+
+services:
+  # NATS with JetStream for queue management
+  nats:
+    image: nats:latest
+    container_name: batchsender-test-nats
+    ports:
+      - "4222:4222" # Client connections
+      - "8222:8222" # HTTP monitoring
+    command: ["-js", "-m", "8222", "-sd", "/data"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - test-network
+
+  # PostgreSQL for application data
+  postgres:
+    image: postgres:15-alpine
+    container_name: batchsender-test-postgres
+    environment:
+      POSTGRES_DB: batchsender_test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d batchsender_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres-test-data:/var/lib/postgresql/data
+    networks:
+      - test-network
+
+  # ClickHouse for analytics and event logging
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: batchsender-test-clickhouse
+    environment:
+      CLICKHOUSE_DB: batchsender_test
+      CLICKHOUSE_USER: test
+      CLICKHOUSE_PASSWORD: test
+    ports:
+      - "8124:8123" # HTTP interface
+      - "9001:9000" # Native interface
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - clickhouse-test-data:/var/lib/clickhouse
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge
+
+volumes:
+  postgres-test-data:
+  clickhouse-test-data:

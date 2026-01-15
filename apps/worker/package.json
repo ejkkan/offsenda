@@ -1,0 +1,50 @@
+{
+  "name": "worker",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts --format esm --dts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run src/providers/*.test.ts src/__tests__/rate-limiter.test.ts",
+    "test:unit": "vitest run src/providers/*.test.ts src/__tests__/rate-limiter.test.ts",
+    "test:ratelimit": "vitest run src/__tests__/rate-limiter.test.ts",
+    "test:ratelimit:integration": "vitest run src/__tests__/rate-limiter.integration.test.ts",
+    "test:integration": "vitest run src/__tests__/integration",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e:watch": "vitest --config vitest.e2e.config.ts",
+    "test:all": "pnpm test:unit && pnpm test:integration && pnpm test:e2e",
+    "test:rate:aws-ses": "SES_RATE_LIMIT=14 MOCK_RATE_LIMIT=14 pnpm test:e2e",
+    "test:rate:high": "SES_RATE_LIMIT=100 MOCK_RATE_LIMIT=100 pnpm test:e2e",
+    "test:rate:enterprise": "SES_RATE_LIMIT=500 MOCK_RATE_LIMIT=500 pnpm test:e2e",
+    "test:rate:no-limit": "SES_RATE_LIMIT=999999 MOCK_RATE_LIMIT=999999 pnpm test:e2e",
+    "test:rate:all": "./scripts/test-rate-limits.sh all",
+    "load-test": "tsx scripts/nats-load-test.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.500.0",
+    "@batchsender/db": "workspace:*",
+    "@clickhouse/client": "^1.0.1",
+    "@neondatabase/serverless": "^0.9.0",
+    "drizzle-orm": "^0.29.3",
+    "fastify": "^4.25.2",
+    "ioredis": "^5.9.1",
+    "nats": "^2.29.3",
+    "pino": "^10.1.1",
+    "pino-pretty": "^11.3.0",
+    "postgres": "^3.4.3",
+    "prom-client": "^15.1.3",
+    "resend": "^3.2.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "@vitest/coverage-v8": "^1.0.0",
+    "tsup": "^8.0.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.0.0"
+  }
+}

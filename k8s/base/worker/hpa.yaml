@@ -1,0 +1,50 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: worker-hpa
+  namespace: batchsender
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: worker
+  minReplicas: 2
+  maxReplicas: 50
+  metrics:
+  # Scale based on CPU usage
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+  # Scale based on NATS queue depth (requires Prometheus Adapter)
+  # This metric tracks pending messages in batch-processor consumer
+  # Scales up when >1000 messages per pod
+  - type: Pods
+    pods:
+      metric:
+        name: nats_queue_depth_batch_processor
+      target:
+        type: AverageValue
+        averageValue: "1000"
+  behavior:
+    # Scale up quickly when load increases
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Pods
+        value: 4
+        periodSeconds: 30
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      selectPolicy: Max
+    # Scale down slowly to avoid thrashing
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Min

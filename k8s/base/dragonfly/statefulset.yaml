@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dragonfly
+  namespace: batchsender
+spec:
+  serviceName: dragonfly
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dragonfly
+  template:
+    metadata:
+      labels:
+        app: dragonfly
+    spec:
+      containers:
+      - name: dragonfly
+        image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.14.0
+        args:
+          - "--maxmemory"
+          - "900mb"
+          - "--cache_mode"  # Dragonfly equivalent of maxmemory-policy allkeys-lru
+          - "--dir"
+          - "/data"
+        ports:
+        - containerPort: 6379
+          name: redis
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: hcloud-volumes
+      resources:
+        requests:
+          storage: 5Gi

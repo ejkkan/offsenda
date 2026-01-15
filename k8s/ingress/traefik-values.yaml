@@ -1,0 +1,28 @@
+# Traefik configuration for production
+service:
+  type: LoadBalancer  # Hetzner will create a load balancer
+
+# Enable access logs
+logs:
+  access:
+    enabled: true
+
+# Metrics for Prometheus
+metrics:
+  prometheus:
+    enabled: true
+    entryPoint: metrics
+
+# Resource limits
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# Persist SSL certificates
+persistence:
+  enabled: true
+  size: 1Gi

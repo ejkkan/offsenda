@@ -1,0 +1,54 @@
+# Prometheus Adapter Helm Values
+# This configures the Prometheus Adapter to expose NATS queue depth metrics
+# to Kubernetes HPA for autoscaling based on queue depth
+
+# Prometheus server URL
+prometheus:
+  url: http://prometheus-server.monitoring.svc.cluster.local
+  port: 80
+
+# Custom metric rules
+rules:
+  # Enable custom metrics API
+  custom:
+  - seriesQuery: 'nats_queue_depth{consumer="batch-processor"}'
+    resources:
+      template: <<.Resource>>
+    name:
+      matches: "^nats_queue_depth$"
+      as: "nats_queue_depth_batch_processor"
+    metricsQuery: 'avg(nats_queue_depth{consumer="batch-processor",<<.LabelMatchers>>})'
+
+  - seriesQuery: 'nats_queue_depth{consumer="priority-processor"}'
+    resources:
+      template: <<.Resource>>
+    name:
+      matches: "^nats_queue_depth$"
+      as: "nats_queue_depth_priority_processor"
+    metricsQuery: 'avg(nats_queue_depth{consumer="priority-processor",<<.LabelMatchers>>})'
+
+  # Total NATS pending messages (general purpose)
+  - seriesQuery: 'nats_pending_messages'
+    resources:
+      template: <<.Resource>>
+    name:
+      as: "nats_pending_messages_total"
+    metricsQuery: 'avg(nats_pending_messages{<<.LabelMatchers>>})'
+
+# Resource limits
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+# Enable RBAC
+rbac:
+  create: true
+
+# Service account
+serviceAccount:
+  create: true
+  name: prometheus-adapter

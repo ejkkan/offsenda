@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: batchsender
+  labels:
+    app: nats
+spec:
+  replicas: 3
+  serviceName: nats
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels:
+        app: nats
+    spec:
+      containers:
+      - name: nats
+        image: nats:2.10-alpine
+        command: ["nats-server"]
+        args:
+          - "--jetstream"
+          - "--store_dir=/data"
+          - "--cluster_name=batchsender"
+          - "--name=$(POD_NAME)"
+          - "--cluster=nats://$(POD_NAME).nats:6222"
+          - "--routes=nats://nats-0.nats:6222"
+          - "--routes=nats://nats-1.nats:6222"
+          - "--routes=nats://nats-2.nats:6222"
+          - "--http_port=8222"
+          - "--port=4222"
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        ports:
+        - containerPort: 4222
+          name: client
+        - containerPort: 6222
+          name: cluster
+        - containerPort: 8222
+          name: monitor
+        resources:
+          requests:
+            cpu: 1
+            memory: 2Gi
+          limits:
+            cpu: 2
+            memory: 4Gi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8222
+          initialDelaySeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8222
+          initialDelaySeconds: 5
+          timeoutSeconds: 5
+        volumeMounts:
+        - name: data
+          mountPath: /data
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: hcloud-volumes
+      resources:
+        requests:
+          storage: 50Gi

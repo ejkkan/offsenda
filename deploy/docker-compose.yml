@@ -1,0 +1,45 @@
+services:
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/worker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - PORT=3001
+      - BATCH_SIZE=10
+      - POLL_INTERVAL_MS=5000
+      - RATE_LIMIT_PER_SECOND=10
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Caddy for HTTPS reverse proxy
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - worker
+
+volumes:
+  caddy_data:
+  caddy_config:

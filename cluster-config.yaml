@@ -1,0 +1,123 @@
+# =============================================================================
+# BatchSender Production Cluster Configuration (hetzner-k3s)
+# =============================================================================
+#
+# This creates a production-ready High Availability k3s cluster on Hetzner Cloud:
+# - 3 masters spread across 3 datacenters (HA)
+# - Worker nodes with autoscaling (1-10 nodes)
+# - Full Hetzner integration (CCM, CSI, autoscaler)
+#
+# Prerequisites:
+# 1. Hetzner API token in .env.hetzner
+# 2. SSH keys at ~/.ssh/id_ed25519
+#
+# Usage:
+#   hetzner-k3s create --config cluster-config.yaml
+#
+# To destroy:
+#   hetzner-k3s delete --config cluster-config.yaml
+#
+# =============================================================================
+
+# Hetzner Cloud API token (from .env.hetzner)
+# IMPORTANT: Replace with your actual token or source from .env.hetzner
+hetzner_token: "jX8r0JIRNDYOIRFfAqlbjXJcO4qmnAnjQ2tzKo73MOkFJea1npg4aP7G9X0nzYKm"
+
+# Cluster identification
+cluster_name: batchsender-prod
+kubeconfig_path: "./kubeconfig"
+
+# k3s version (latest stable as of 2025)
+k3s_version: v1.32.0+k3s1
+
+# Networking configuration
+networking:
+  ssh:
+    port: 22
+    use_agent: false
+    public_key_path: "~/.ssh/id_ed25519.pub"
+    private_key_path: "~/.ssh/id_ed25519"
+
+  # Allowed networks for SSH and API access
+  allowed_networks:
+    ssh:
+      - 0.0.0.0/0  # Allow SSH from anywhere (secure via SSH keys)
+    api:
+      - 0.0.0.0/0  # Allow k8s API from anywhere (secure via kubeconfig)
+
+# Master nodes (control plane) - 1 for TESTING (change to 3 for production HA)
+masters_pool:
+  instance_type: cpx22  # 2 vCPU, 4GB RAM, €6.99/mo each
+  instance_count: 1     # TESTING MODE - use 3 for production
+
+  # Single location for testing
+  locations:
+    - fsn1  # Falkenstein, Germany
+
+  # Image to use (Ubuntu 24.04 LTS)
+  image: ubuntu-24.04
+
+# Worker node pools
+worker_node_pools:
+  # Main worker pool with autoscaling
+  - name: workers
+    instance_type: cpx22       # 2 vCPU, 4GB RAM, €6.99/mo each
+    instance_count: 1          # Starts with 1 worker
+    location: fsn1             # Falkenstein (can add more locations later)
+    image: ubuntu-24.04
+
+    # Autoscaling configuration
+    autoscaling:
+      enabled: true
+      min_instances: 1         # Always keep at least 1 worker
+      max_instances: 10        # Scale up to 10 workers during high load
+
+    # Labels for pod scheduling
+    labels:
+      - key: "workload"
+        value: "general"
+      - key: "environment"
+        value: "production"
+
+    # No taints (workers can run any pods)
+    taints: []
+
+# Additional settings
+# Use private network for node-to-node communication (more secure)
+private_network:
+  enabled: true
+  subnet: "10.0.0.0/16"
+
+# Firewall rules
+firewall:
+  enabled: true
+
+  # Allow inbound traffic only on necessary ports
+  allow_incoming:
+    - protocol: tcp
+      port: "6443"    # Kubernetes API
+    - protocol: tcp
+      port: "22"      # SSH
+    - protocol: tcp
+      port: "80"      # HTTP (for load balancers)
+    - protocol: tcp
+      port: "443"     # HTTPS (for load balancers)
+
+# Enable Hetzner integrations
+# These are installed automatically by hetzner-k3s:
+# - Cloud Controller Manager (for load balancers)
+# - CSI Driver (for persistent volumes)
+# - Cluster Autoscaler (for node autoscaling)
+hetzner_ccm_version: latest
+hetzner_csi_version: latest
+
+# k3s configuration
+# Disable Traefik (we'll install it via helm for more control)
+k3s_config:
+  disable:
+    - traefik
+    - servicelb  # Use Hetzner LB instead
+
+  # Enable useful k3s features
+  tls-san:
+    - batchsender-prod.hetzner.cloud

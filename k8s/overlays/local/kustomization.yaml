@@ -1,0 +1,146 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# Local development patches
+patches:
+  # Use local image (imported directly to k3d)
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: worker:latest
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
+    target:
+      kind: Deployment
+      name: worker
+
+  # Local development config for worker
+  # EMAIL_PROVIDER now comes from .env.dev via dev-k8s.sh
+  - patch: |-
+      - op: replace
+        path: /data/NATS_CLUSTER
+        value: nats://nats:4222
+      - op: add
+        path: /data/NATS_REPLICAS
+        value: "1"
+    target:
+      kind: ConfigMap
+      name: worker-config
+
+  # Use local-path storage class for k3d (instead of hcloud-volumes)
+  - patch: |-
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: local-path
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 1Gi
+    target:
+      kind: StatefulSet
+      name: nats
+
+  - patch: |-
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: local-path
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 1Gi
+    target:
+      kind: StatefulSet
+      name: dragonfly
+
+  # Single-node NATS for local dev (no clustering)
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value:
+          - "--jetstream"
+          - "--store_dir=/data"
+          - "--http_port=8222"
+          - "--port=4222"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 256Mi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 512Mi
+    target:
+      kind: StatefulSet
+      name: nats
+
+  # Disable NATS HPA for local dev
+  - patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 1
+    target:
+      kind: HorizontalPodAutoscaler
+      name: nats-hpa
+
+  # Limit KEDA worker scaling for local dev (don't need 50 workers locally)
+  - patch: |-
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 1
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 5
+      - op: replace
+        path: /spec/triggers/0/metadata/lagThreshold
+        value: "100"
+    target:
+      kind: ScaledObject
+      name: worker-scaler
+
+  # ClickHouse adjustments for local dev
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/livenessProbe/initialDelaySeconds
+        value: 60
+      - op: replace
+        path: /spec/template/spec/containers/0/livenessProbe/periodSeconds
+        value: 30
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: local-path
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 5Gi
+    target:
+      kind: StatefulSet
+      name: clickhouse
+
+  # Override ClickHouse storage config (no B2 for local dev)
+  - path: clickhouse-storage-configmap.yaml
+    target:
+      kind: ConfigMap
+      name: clickhouse-storage-config
+
+  # Override ClickHouse init script (no cluster commands for single-node local dev)
+  - path: clickhouse-init-configmap.yaml
+    target:
+      kind: ConfigMap
+      name: clickhouse-init
+
+  # PostgreSQL storage for local dev
+  - patch: |-
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: local-path
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 1Gi
+    target:
+      kind: StatefulSet
+      name: postgres

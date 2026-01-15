@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: batchsender
+  labels:
+    app: worker
+spec:
+  # Replicas managed by HPA - do not set replicas here
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+      - name: worker
+        image: registry.localhost:5000/worker:dev
+        ports:
+        - containerPort: 6001
+          name: http
+        envFrom:
+        - configMapRef:
+            name: worker-config
+        - secretRef:
+            name: worker-secrets
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 6001
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 6001
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      # Graceful shutdown - give NATS workers time to finish
+      terminationGracePeriodSeconds: 60

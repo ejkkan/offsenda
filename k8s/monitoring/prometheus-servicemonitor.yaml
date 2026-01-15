@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: worker-metrics
+  namespace: batchsender
+  labels:
+    app: batchsender-worker
+spec:
+  selector:
+    matchLabels:
+      app: batchsender-worker
+  endpoints:
+  - port: http
+    path: /api/metrics
+    interval: 30s
+    scrapeTimeout: 10s

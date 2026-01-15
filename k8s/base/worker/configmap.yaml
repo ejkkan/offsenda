@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: worker-config
+  namespace: batchsender
+data:
+  # Email provider (mock, resend, ses)
+  EMAIL_PROVIDER: "mock"
+
+  # Node environment
+  NODE_ENV: "development"
+
+  # Service URLs (use kubernetes service DNS)
+  REDIS_URL: "redis://dragonfly.batchsender.svc:6379"
+  NATS_URL: "nats://nats.batchsender.svc:4222"
+  CLICKHOUSE_HOST: "clickhouse.batchsender.svc"
+  CLICKHOUSE_DATABASE: "default"
+  CLICKHOUSE_USER: "default"
+
+  # Worker settings
+  WORKER_CONCURRENCY: "10"
+  LOG_LEVEL: "info"

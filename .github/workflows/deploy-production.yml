@@ -1,0 +1,129 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/worker/**'
+      - 'k8s/**'
+      - '.github/workflows/deploy-production.yml'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/ejkkan/batchsender-worker
+          tags: |
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/worker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubectl
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
+        run: |
+          echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -k k8s/overlays/production
+
+      - name: Wait for rollout to complete
+        run: |
+          kubectl rollout status deployment/worker -n batchsender --timeout=5m
+
+      - name: Verify deployment
+        run: |
+          echo "Verifying worker deployment..."
+          kubectl wait --for=condition=ready pod -l app=worker -n batchsender --timeout=2m
+
+          # Check ready replicas
+          READY_REPLICAS=$(kubectl get deployment worker -n batchsender -o jsonpath='{.status.readyReplicas}')
+          if [ -z "$READY_REPLICAS" ] || [ "$READY_REPLICAS" -lt 1 ]; then
+            echo "❌ No ready worker replicas"
+            exit 1
+          fi
+          echo "✅ $READY_REPLICAS worker(s) ready"
+
+      - name: Check KEDA autoscaling
+        run: |
+          echo "Verifying KEDA autoscaling..."
+          kubectl get scaledobject worker-scaler -n batchsender
+
+          # Check KEDA is ready
+          SCALED_OBJECT=$(kubectl get scaledobject worker-scaler -n batchsender -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
+          if [ "$SCALED_OBJECT" = "True" ]; then
+            echo "✅ KEDA autoscaling is active"
+          else
+            echo "⚠️  KEDA autoscaling not ready (may take a few minutes)"
+          fi
+
+      - name: Health check
+        run: |
+          echo "Running health checks..."
+          WORKER_POD=$(kubectl get pods -l app=worker -n batchsender -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+
+          if [ -n "$WORKER_POD" ]; then
+            echo "Testing health endpoint on $WORKER_POD..."
+            kubectl exec -n batchsender $WORKER_POD -- curl -sf http://localhost:6001/health || echo "⚠️  Health check failed (pod may still be starting)"
+
+            echo "Testing metrics endpoint..."
+            kubectl exec -n batchsender $WORKER_POD -- curl -sf http://localhost:6001/api/metrics | head -5 || echo "⚠️  Metrics check failed (pod may still be starting)"
+          fi
+
+      - name: Deployment summary
+        if: success()
+        run: |
+          echo "✅ Deployment successful!"
+          echo ""
+          echo "Deployed image: ${{ steps.meta.outputs.tags }}"
+          echo ""
+          echo "Pod status:"
+          kubectl get pods -n batchsender
+          echo ""
+          echo "KEDA scaling:"
+          kubectl get scaledobject -n batchsender
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed!"
+          echo "Check the logs above for details"

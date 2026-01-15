@@ -1,0 +1,132 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: clickhouse-backup
+  namespace: batchsender
+  labels:
+    app: clickhouse-backup
+spec:
+  # Schedule: Daily at 3 AM UTC
+  # Cron format: minute hour day month weekday
+  # "0 3 * * *" = At 03:00 every day
+  #
+  # Other schedule examples:
+  # "0 */12 * * *"  = Every 12 hours
+  # "0 2 * * 0"     = Weekly on Sunday at 2 AM
+  # "0 1 1 * *"     = Monthly on 1st at 1 AM
+  schedule: "0 3 * * *"
+
+  # Keep last 3 successful jobs and 1 failed job for debugging
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+
+  # Don't allow concurrent backups (wait for previous to finish)
+  concurrencyPolicy: Forbid
+
+  jobTemplate:
+    spec:
+      # Retry up to 2 times if backup fails
+      backoffLimit: 2
+
+      # Delete job after 24 hours to avoid clutter
+      ttlSecondsAfterFinished: 86400
+
+      template:
+        metadata:
+          labels:
+            app: clickhouse-backup
+        spec:
+          restartPolicy: OnFailure
+
+          containers:
+          - name: backup
+            # Use same ClickHouse version as main deployment
+            image: clickhouse/clickhouse-server:24-alpine
+
+            command: ["/bin/sh"]
+            args:
+            - -c
+            - |
+              set -e
+
+              echo "=== ClickHouse Automated Backup ==="
+              echo "Timestamp: $(date)"
+              echo "Backup destination: Backblaze B2"
+              echo ""
+
+              # Wait for ClickHouse to be ready
+              echo "Checking ClickHouse connectivity..."
+              until clickhouse-client --host clickhouse.batchsender.svc.cluster.local --query "SELECT 1" > /dev/null 2>&1; do
+                echo "Waiting for ClickHouse..."
+                sleep 5
+              done
+              echo "✓ ClickHouse is ready"
+              echo ""
+
+              # Generate backup name with timestamp
+              BACKUP_NAME="backup_full_$(date +%Y%m%d_%H%M%S)"
+              echo "Backup name: $BACKUP_NAME"
+              echo ""
+
+              # Run full backup to B2
+              echo "Starting backup..."
+              clickhouse-client \
+                --host clickhouse.batchsender.svc.cluster.local \
+                --query "
+                  BACKUP DATABASE default
+                  TO S3(
+                    'https://s3.eu-central-003.backblazeb2.com/batchsender-clickhouse-cold/backups/${BACKUP_NAME}/',
+                    '${B2_KEY_ID}',
+                    '${B2_APP_KEY}'
+                  )
+                  SETTINGS
+                    compression_level=3,
+                    backup_threads=4
+                "
+
+              echo ""
+              echo "✓ Backup completed successfully!"
+              echo ""
+
+              # Show recent backups
+              echo "Recent backups:"
+              clickhouse-client \
+                --host clickhouse.batchsender.svc.cluster.local \
+                --query "
+                  SELECT
+                    name,
+                    status,
+                    formatDateTime(start_time, '%Y-%m-%d %H:%M:%S') as started,
+                    formatDateTime(end_time, '%Y-%m-%d %H:%M:%S') as finished,
+                    formatReadableSize(total_size) as size
+                  FROM system.backups
+                  WHERE status = 'BACKUP_COMPLETE'
+                  ORDER BY start_time DESC
+                  LIMIT 5
+                  FORMAT PrettyCompact
+                " || echo "No backup history available"
+
+              echo ""
+              echo "=== Backup job complete ==="
+
+            env:
+            # B2 credentials from secret
+            - name: B2_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-b2-credentials
+                  key: key-id
+            - name: B2_APP_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-b2-credentials
+                  key: app-key
+
+            # Resource limits
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi

@@ -1,0 +1,134 @@
+services:
+  # PostgreSQL for isolated local testing (no Neon dependency)
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "5455:5432"  # Use 5455 to avoid conflicts with other containers
+    environment:
+      POSTGRES_USER: batchsender
+      POSTGRES_PASSWORD: batchsender
+      POSTGRES_DB: batchsender
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U batchsender"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # NATS JetStream for queuing
+  nats:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "4222:4222"   # Client connections
+      - "6222:6222"   # Cluster connections
+      - "8222:8222"   # HTTP monitoring
+    command: ["nats-server", "--jetstream", "--store_dir=/data", "--http_port=8222"]
+    volumes:
+      - nats_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ClickHouse for analytics/event logging
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    restart: unless-stopped
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # Native interface
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./infra/clickhouse/init:/docker-entrypoint-initdb.d
+      - ./infra/clickhouse/config/storage.xml:/etc/clickhouse-server/config.d/storage.xml:ro
+    environment:
+      - CLICKHOUSE_DB=batchsender
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse
+      # Backblaze B2 cold storage credentials
+      - B2_KEY_ID=${B2_KEY_ID:-}
+      - B2_APP_KEY=${B2_APP_KEY:-}
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # Dragonfly for distributed rate limiting
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.14.0
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    ulimits:
+      memlock: -1
+    volumes:
+      - dragonfly_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Mock SES/SNS Server (for local testing)
+  mock-ses:
+    build:
+      context: ./apps/mock-ses
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "4566:4566"
+    environment:
+      - PORT=4566
+      - WEBHOOK_URL=http://worker:6001/webhooks/ses
+      - WEBHOOK_DELAY_MS=1000
+      - DELIVERED_RATE=0.90
+      - BOUNCED_RATE=0.05
+      - COMPLAINED_RATE=0.01
+
+  # Worker service (local build)
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile.local
+    restart: unless-stopped
+    ports:
+      - "6001:6001"
+    environment:
+      # Use local PostgreSQL by default, override with DATABASE_URL env var
+      - DATABASE_URL=${DATABASE_URL:-postgresql://batchsender:batchsender@postgres:5432/batchsender}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-local-dev-secret}
+      - NATS_CLUSTER=nats://nats:4222
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse
+      - DRAGONFLY_URL=dragonfly:6379
+      # SES provider config (use mock-ses for testing)
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-ses}
+      - SES_ENDPOINT=http://mock-ses:4566/ses/send
+      - AWS_REGION=us-east-1
+      - PORT=6001
+      - BATCH_SIZE=10
+      - POLL_INTERVAL_MS=5000
+      - RATE_LIMIT_PER_SECOND=100
+      - RATE_LIMIT_PER_IP=100
+      - NODE_ENV=development
+    depends_on:
+      - postgres
+      - nats
+      - clickhouse
+      - dragonfly
+      - mock-ses
+    volumes:
+      - ./apps/worker/src:/app/apps/worker/src
+    command: ["pnpm", "--filter=worker", "dev"]
+
+volumes:
+  postgres_data:
+  nats_data:
+  clickhouse_data:
+  dragonfly_data:

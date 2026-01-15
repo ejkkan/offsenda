@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-init
+  namespace: batchsender
+data:
+  init-schema.sql: |
+    -- Single-node setup for local development (no cluster commands)
+    CREATE DATABASE IF NOT EXISTS batchsender;
+
+    -- Email events table (single node, no replication)
+    CREATE TABLE IF NOT EXISTS batchsender.email_events
+    (
+        event_id UUID DEFAULT generateUUIDv4(),
+        event_type Enum8('queued' = 1, 'sent' = 2, 'delivered' = 3, 'opened' = 4, 'clicked' = 5, 'bounced' = 6, 'soft_bounced' = 9, 'complained' = 7, 'failed' = 8),
+        batch_id UUID,
+        recipient_id UUID,
+        user_id UUID,
+        email String,
+        provider_message_id String DEFAULT '',
+        metadata String DEFAULT '{}',
+        error_message String DEFAULT '',
+        created_at DateTime64(3) DEFAULT now64(3),
+        event_date Date DEFAULT toDate(created_at),
+        INDEX idx_user_id user_id TYPE bloom_filter GRANULARITY 4
+    )
+    ENGINE = MergeTree()
+    PARTITION BY toYYYYMM(event_date)
+    ORDER BY (batch_id, recipient_id, event_type);
+
+    -- Message index for webhook lookups (single node, no replication)
+    CREATE TABLE IF NOT EXISTS batchsender.email_message_index
+    (
+        provider_message_id String,
+        recipient_id UUID,
+        batch_id UUID,
+        user_id UUID,
+        created_at DateTime DEFAULT now()
+    )
+    ENGINE = MergeTree()
+    ORDER BY provider_message_id
+    TTL created_at + INTERVAL 30 DAY;
+
+    -- Batch stats materialized view (single node)
+    CREATE MATERIALIZED VIEW IF NOT EXISTS batchsender.batch_stats_mv
+    ENGINE = SummingMergeTree()
+    PARTITION BY toYYYYMM(event_date)
+    ORDER BY (batch_id, event_date)
+    AS SELECT
+        batch_id,
+        event_date,
+        countIf(event_type = 'sent') AS sent_count,
+        countIf(event_type = 'delivered') AS delivered_count,
+        countIf(event_type = 'opened') AS opened_count,
+        countIf(event_type = 'clicked') AS clicked_count,
+        countIf(event_type = 'bounced') AS bounced_count,
+        countIf(event_type = 'complained') AS complained_count,
+        countIf(event_type = 'failed') AS failed_count
+    FROM batchsender.email_events
+    GROUP BY batch_id, event_date;
+
+    -- Daily user stats materialized view (single node)
+    CREATE MATERIALIZED VIEW IF NOT EXISTS batchsender.daily_user_stats_mv
+    ENGINE = SummingMergeTree()
+    PARTITION BY toYYYYMM(event_date)
+    ORDER BY (user_id, event_date)
+    AS SELECT
+        user_id,
+        event_date,
+        count() AS total_events,
+        countIf(event_type = 'sent') AS sent_count,
+        countIf(event_type = 'delivered') AS delivered_count,
+        countIf(event_type = 'bounced') AS bounced_count
+    FROM batchsender.email_events
+    GROUP BY user_id, event_date;

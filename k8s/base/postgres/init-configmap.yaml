@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: batchsender
+data:
+  init-schema.sql: |
+    -- Create enums
+    CREATE TYPE batch_status AS ENUM (
+      'draft',
+      'queued',
+      'processing',
+      'completed',
+      'failed',
+      'paused'
+    );
+
+    CREATE TYPE recipient_status AS ENUM (
+      'pending',
+      'queued',
+      'sent',
+      'delivered',
+      'bounced',
+      'complained',
+      'failed'
+    );
+
+    -- Users table
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email VARCHAR(255) NOT NULL UNIQUE,
+      password_hash VARCHAR(255) NOT NULL,
+      name VARCHAR(255),
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    -- Batches table
+    CREATE TABLE IF NOT EXISTS batches (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      subject VARCHAR(500) NOT NULL,
+      from_email VARCHAR(255) NOT NULL,
+      from_name VARCHAR(255),
+      html_content TEXT,
+      text_content TEXT,
+      status batch_status NOT NULL DEFAULT 'draft',
+      total_recipients INTEGER NOT NULL DEFAULT 0,
+      sent_count INTEGER NOT NULL DEFAULT 0,
+      delivered_count INTEGER NOT NULL DEFAULT 0,
+      bounced_count INTEGER NOT NULL DEFAULT 0,
+      failed_count INTEGER NOT NULL DEFAULT 0,
+      scheduled_at TIMESTAMP,
+      started_at TIMESTAMP,
+      completed_at TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS batches_user_id_idx ON batches(user_id);
+    CREATE INDEX IF NOT EXISTS batches_status_idx ON batches(status);
+
+    -- Recipients table
+    CREATE TABLE IF NOT EXISTS recipients (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      batch_id UUID NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
+      email VARCHAR(255) NOT NULL,
+      name VARCHAR(255),
+      variables JSONB,
+      status recipient_status NOT NULL DEFAULT 'pending',
+      provider_message_id VARCHAR(255),
+      sent_at TIMESTAMP,
+      delivered_at TIMESTAMP,
+      bounced_at TIMESTAMP,
+      error_message TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS recipients_batch_id_idx ON recipients(batch_id);
+    CREATE INDEX IF NOT EXISTS recipients_status_idx ON recipients(status);
+    CREATE INDEX IF NOT EXISTS recipients_provider_message_id_idx ON recipients(provider_message_id);
+    CREATE INDEX IF NOT EXISTS recipients_batch_status_idx ON recipients(batch_id, status);
+
+    -- API Keys table
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      key_hash VARCHAR(255) NOT NULL,
+      key_prefix VARCHAR(10) NOT NULL,
+      last_used_at TIMESTAMP,
+      expires_at TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS api_keys_user_id_idx ON api_keys(user_id);
+    CREATE INDEX IF NOT EXISTS api_keys_key_hash_idx ON api_keys(key_hash);

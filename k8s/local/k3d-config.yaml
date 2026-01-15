@@ -1,0 +1,26 @@
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: batchsender
+servers: 1
+agents: 3
+registries:
+  create:
+    name: registry.localhost
+    host: "0.0.0.0"
+    hostPort: "5111"
+ports:
+  # Worker API exposed on localhost:6001
+  - port: 6001:80
+    nodeFilters:
+      - loadbalancer
+options:
+  k3s:
+    extraArgs:
+      # Disable traefik, we'll use simple port forwarding
+      - arg: --disable=traefik
+        nodeFilters:
+          - server:*
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true

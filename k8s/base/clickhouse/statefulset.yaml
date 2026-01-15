@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse
+  namespace: batchsender
+  labels:
+    app: clickhouse
+spec:
+  serviceName: clickhouse-headless
+  replicas: 1  # Scale up to 3 when needed
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: clickhouse
+  template:
+    metadata:
+      labels:
+        app: clickhouse
+    spec:
+      affinity:
+        # Spread replicas across nodes for HA
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: clickhouse
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: clickhouse
+        image: clickhouse/clickhouse-server:24-alpine
+        ports:
+        - containerPort: 8123
+          name: http
+        - containerPort: 9000
+          name: native
+        env:
+        - name: CLICKHOUSE_USER
+          value: default
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-secrets
+              key: password
+        - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+          value: "1"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+          # Scale up when needed:
+          # cpu: 8000m, memory: 32Gi
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: 8123
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: 8123
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/clickhouse
+        - name: init-scripts
+          mountPath: /docker-entrypoint-initdb.d
+      volumes:
+      - name: init-scripts
+        configMap:
+          name: clickhouse-init
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 20Gi  # Hot data only (cold goes to B2). Scale up when needed.

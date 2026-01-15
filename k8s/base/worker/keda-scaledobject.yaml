@@ -1,0 +1,21 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-scaler
+  namespace: batchsender
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 2
+  maxReplicaCount: 50
+  pollingInterval: 5  # Check queue every 5 seconds
+  cooldownPeriod: 30   # Wait 30s before scaling down
+  triggers:
+  - type: nats-jetstream
+    metadata:
+      natsServerMonitoringEndpoint: "nats.batchsender.svc:8222"
+      account: "$G"
+      stream: "email-system"
+      consumer: "batch-processor"
+      lagThreshold: "1000"  # Scale up when >1000 pending messages per pod
+      activationLagThreshold: "100"  # Activate scaling when >100 messages

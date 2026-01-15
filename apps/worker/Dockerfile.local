@@ -1,0 +1,27 @@
+# Development Dockerfile - mounts source for hot reload
+FROM node:20-alpine
+
+RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/worker/package.json ./apps/worker/
+COPY packages/db/package.json ./packages/db/
+
+# Install all dependencies (including dev)
+RUN pnpm install
+
+# Copy source (will be overwritten by volume mount in dev)
+COPY packages/db ./packages/db
+COPY apps/worker ./apps/worker
+
+# Build db package
+RUN pnpm --filter=@batchsender/db build
+
+WORKDIR /app
+
+EXPOSE 3001
+
+CMD ["pnpm", "--filter=worker", "dev"]

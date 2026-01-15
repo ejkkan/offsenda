@@ -1,0 +1,67 @@
+# Local monitoring stack for batchsender
+# Run with: docker compose -f docker-compose.local.yml -f docker-compose.monitoring.yml up -d
+
+services:
+  # Prometheus - Metrics collection
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    restart: unless-stopped
+    ports:
+      - "9095:9090"  # Prometheus UI (using 9095 to avoid conflicts)
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'  # Keep 30 days of data
+      - '--storage.tsdb.retention.size=10GB'  # Max 10GB storage
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - default
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Access host services
+
+  # Grafana - Metrics visualization
+  grafana:
+    image: grafana/grafana:10.2.3
+    restart: unless-stopped
+    ports:
+      - "3003:3000"  # Grafana UI (using 3003 to avoid conflict with your app)
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - default
+    depends_on:
+      - prometheus
+
+  # Node Exporter - System metrics (CPU, memory, disk)
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    command:
+      - '--path.rootfs=/host'
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro
+    networks:
+      - default
+
+volumes:
+  prometheus_data:
+  grafana_data:

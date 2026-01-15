@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clickhouse
+  namespace: batchsender
+  labels:
+    app: clickhouse
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clickhouse
+  template:
+    metadata:
+      labels:
+        app: clickhouse
+    spec:
+      containers:
+      - name: clickhouse
+        image: clickhouse/clickhouse-server:24-alpine
+        ports:
+        - containerPort: 8123
+          name: http
+        - containerPort: 9000
+          name: native
+        env:
+        - name: CLICKHOUSE_USER
+          value: default
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-secrets
+              key: password
+        - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+          value: "1"
+        - name: B2_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-b2-credentials
+              key: key-id
+        - name: B2_APP_KEY
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-b2-credentials
+              key: app-key
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: 8123
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: 8123
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/clickhouse
+        - name: init-scripts
+          mountPath: /docker-entrypoint-initdb.d
+        - name: storage-config
+          mountPath: /etc/clickhouse-server/config.d/storage.xml
+          subPath: storage.xml
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: clickhouse-pvc
+      - name: init-scripts
+        configMap:
+          name: clickhouse-init
+      - name: storage-config
+        configMap:
+          name: clickhouse-storage-config

@@ -1,0 +1,54 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+dist
+.next
+.turbo
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.*.local
+.env.dev
+.env.prod
+.env.hetzner
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Kubernetes
+kubeconfig
+*.kubeconfig
+sealed-secrets-cert.pem
+cluster-config.yaml  # Contains Hetzner API token
+
+# Misc
+*.tsbuildinfo

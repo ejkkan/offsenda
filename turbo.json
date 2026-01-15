@@ -1,0 +1,26 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "DATABASE_URL",
+    "NEXTAUTH_SECRET",
+    "NEXTAUTH_URL",
+    "EMAIL_PROVIDER",
+    "RESEND_API_KEY"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    }
+  }
+}

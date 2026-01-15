@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: worker-ingress
+  namespace: batchsender
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - api.batchsender.com  # Change this to your domain
+      secretName: worker-tls
+  rules:
+    - host: api.batchsender.com  # Change this to your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: worker
+                port:
+                  number: 6001

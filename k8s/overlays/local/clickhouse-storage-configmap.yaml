@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-storage-config
+  namespace: batchsender
+data:
+  storage.xml: |
+    <clickhouse>
+      <storage_configuration>
+        <disks>
+          <default>
+            <!-- Use default local disk only in local dev -->
+          </default>
+        </disks>
+        <policies>
+          <tiered>
+            <volumes>
+              <hot>
+                <disk>default</disk>
+              </hot>
+              <!-- No cold storage in local dev -->
+            </volumes>
+          </tiered>
+        </policies>
+      </storage_configuration>
+    </clickhouse>

@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: worker-metrics
+  namespace: monitoring
+  labels:
+    app: worker
+    release: monitoring  # Must match kube-prometheus-stack release name
+spec:
+  selector:
+    matchLabels:
+      app: worker
+  namespaceSelector:
+    matchNames:
+      - batchsender
+  endpoints:
+    - port: http
+      path: /api/metrics
+      interval: 30s
+      scrapeTimeout: 10s

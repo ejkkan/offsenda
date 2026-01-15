@@ -1,0 +1,4 @@
+# Replace with your domain
+worker.yourdomain.com {
+    reverse_proxy worker:3001
+}
