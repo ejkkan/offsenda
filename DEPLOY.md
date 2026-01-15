@@ -1,455 +1,599 @@
-# Production Deployment Guide
+# Production Deployment Guide - BatchSender on Hetzner Kubernetes
 
-This guide covers deploying BatchSender to production on Hetzner Kubernetes using **hetzner-k3s** - a production-ready k3s cluster that deploys in just 2-3 minutes with full GitOps automation.
-
-## Why hetzner-k3s?
-
-- ✅ **No Packer snapshots needed** (unlike kube-hetzner/Terraform)
-- ✅ **3-minute cluster creation** (vs 15-20 min with Terraform)
-- ✅ **Production-ready HA** across 3 datacenters
-- ✅ **Autoscaling included** out-of-the-box
-- ✅ **Single YAML config** - no Terraform state management
-
-## Table of Contents
-
-- [Prerequisites](#prerequisites)
-- [Quick Start (30 minutes total)](#quick-start-30-minutes-total)
-- [Initial Setup (Step-by-Step)](#initial-setup-step-by-step)
-- [Daily Operations (GitOps)](#daily-operations-gitops)
-- [Accessing Services](#accessing-services)
-- [Troubleshooting](#troubleshooting)
+**Last Updated:** 2026-01-16
+**Status:** ✅ Production cluster running
+**Cluster:** 1 master + 2 workers (cpx22, €14/mo)
+**Location:** Hetzner Cloud (fsn1 datacenter)
 
 ---
 
-## Prerequisites
+## 📊 Current Deployment Status
 
-### Local Tools
+### ✅ What's Running
+- **Cluster**: 1 master + 2 worker nodes (waiting for IP limit increase for 3-master HA)
+- **PostgreSQL**: External (Neon Database) - connection working
+- **DragonflyDB**: Running (Redis-compatible, distributed rate limiting)
+- **NATS JetStream**: Running (message queue, single-node mode)
+- **ClickHouse**: Running with production password
+- **Worker Pods**: 2 replicas, fully operational
+- **KEDA Autoscaling**: Active (scales 2-50 workers based on NATS queue depth)
+- **GitOps**: ✅ Push to main → auto-deploy via GitHub Actions
 
-Install these on your laptop:
+### 🔑 GitHub Secrets Configured
+Only 2 secrets needed in GitHub (Settings → Secrets → Actions):
+- ✅ `KUBECONFIG` - Base64-encoded kubeconfig file
+- ✅ `GH_TOKEN` - Your GitHub personal access token (for pushing Docker images)
 
+**All other secrets** (passwords, API keys) are encrypted in sealed-secrets YAML files in Git!
+
+### 📦 Current Services
 ```bash
-# macOS
-brew tap vitobotta/tap
-brew install vitobotta/tap/hetzner_k3s kubectl helm kubeseal
+kubectl get pods -n batchsender
 
-# Linux
-# Download hetzner-k3s from: https://github.com/vitobotta/hetzner-k3s/releases
-# Install kubectl, helm, kubeseal from official sites
+NAME                      READY   STATUS    RESTARTS   AGE
+clickhouse-0              1/1     Running   0          20m
+dragonfly-0               1/1     Running   0          3h
+nats-0                    1/1     Running   0          3h
+postgres-0                1/1     Running   0          3h
+worker-7f59f67cbd-pmdsm   1/1     Running   0          5m
+worker-7f59f67cbd-tbnvh   1/1     Running   0          25m
 ```
 
-### Hetzner Account
-
-1. Create account at https://console.hetzner.cloud
-2. Create project: `batchsender`
-3. Go to **Security → API Tokens**
-4. Generate token with **Read & Write** permissions
-5. Save the token
-
-### Environment File
-
-Create `.env.prod` in project root:
-
-```bash
-# .env.prod (DO NOT commit to Git!)
-
-# PostgreSQL (Neon)
-DATABASE_URL=postgresql://user:pass@your-neon-instance.neon.tech/batchsender
-
-# Email Provider
-RESEND_API_KEY=re_xxxxxxxxxxxxx
-
-# Worker
-WEBHOOK_SECRET=your_random_secret_here
-NODE_ENV=production
-
-# ClickHouse
-CLICKHOUSE_PASSWORD=create_a_strong_password_here
-CLICKHOUSE_USER=default
-CLICKHOUSE_DATABASE=batchsender
-
-# Backblaze B2 (for ClickHouse backups)
-B2_KEY_ID=your_b2_key_id
-B2_APP_KEY=your_b2_app_key
-B2_BUCKET=batchsender-clickhouse-backups
-```
+### 💰 Current Cost
+- **Hetzner**: €14/mo (1 master + 2 workers, cpx22 servers)
+- **Neon PostgreSQL**: $0/mo (free tier)
+- **Backblaze B2**: ~€0.50/mo (ClickHouse backups, minimal usage)
+- **Total**: ~€15/mo
 
 ---
 
-## Quick Start (30 minutes total)
+## 🚀 Quick Start - Recreate Cluster from Scratch
 
-For the impatient - here's the TL;DR:
+If you need to recreate the cluster (testing, disaster recovery, or starting fresh), follow these steps:
 
+### Prerequisites
+- ✅ `.env.hetzner` file with Hetzner API token
+- ✅ `.env.prod` file with production secrets (**CRITICAL - keep this backed up!**)
+- ✅ Tools installed: `hetzner-k3s`, `kubectl`, `helm`, `kubeseal`
+
+### Step 1: Create Cluster (3 minutes)
 ```bash
-# 1. Create cluster (3 min)
-hetzner-k3s create --config cluster-config.yaml
-
-# 2. Install infrastructure (10 min)
-./scripts/bootstrap-infrastructure.sh
-
-# 3. Deploy app (5 min)
-./scripts/seal-secrets.sh
-export KUBECONFIG=./kubeconfig
-kubectl apply -k k8s/overlays/production
-./scripts/verify-deployment.sh
-
-# 4. Set up CI/CD (10 min)
-base64 -i kubeconfig  # Add to GitHub Secrets
-git push origin main   # Test automated deployment
-```
-
-✅ **Done!** Production-ready Kubernetes with GitOps.
-
----
-
-## Initial Setup (Step-by-Step)
-
-### Step 1: Create Kubernetes Cluster (3 minutes!)
-
-First, update `cluster-config.yaml` with your Hetzner token:
-
-```bash
-# Edit cluster-config.yaml and replace ${HCLOUD_TOKEN} with your actual token
-# Or source it from .env.hetzner:
+# Source Hetzner token
 source .env.hetzner
-sed -i "s/\${HCLOUD_TOKEN}/$HCLOUD_TOKEN/" cluster-config.yaml
-```
 
-Then create the cluster:
-
-```bash
+# Create cluster
 hetzner-k3s create --config cluster-config.yaml
+
+# Verify
+export KUBECONFIG=./kubeconfig
+kubectl get nodes
 ```
 
-This creates:
-- **3 master nodes** (High Availability) across 3 datacenters (fsn1, nbg1, hel1)
-- **1 worker node** with autoscaling (1-10 nodes)
-- **Hetzner Cloud Controller Manager** (load balancers)
-- **Hetzner CSI Driver** (persistent storage)
-- **Cluster Autoscaler** (automatic node scaling)
+**Output:**
+```
+NAME                       STATUS   ROLES                       AGE
+batchsender-prod-master1   Ready    control-plane,etcd,master   2m
+batchsender-prod-workers-* Ready    <none>                      1m
+```
 
-**Files created:**
-- `./kubeconfig` - Cluster access credentials
-
-### Step 2: Install Infrastructure Components (10 minutes)
-
+### Step 2: Install Infrastructure (10 minutes)
 ```bash
 ./scripts/bootstrap-infrastructure.sh
 ```
 
 This installs:
-- KEDA (worker autoscaling based on NATS queue)
+- KEDA (worker autoscaling)
 - Sealed Secrets (secret encryption)
 - Prometheus + Grafana (monitoring)
 - Metrics Server (CPU/memory metrics)
 - cert-manager (SSL certificates)
 
-**Files created:**
-- `sealed-secrets-cert.pem` - For encrypting secrets
-
-### Step 3: Encrypt & Deploy Application (5 minutes)
-
+### Step 3: Deploy Application (2 minutes)
 ```bash
-# Encrypt all secrets from .env.prod
-./scripts/seal-secrets.sh
-
-# Set kubectl context
 export KUBECONFIG=./kubeconfig
-
-# Deploy all services
 kubectl apply -k k8s/overlays/production
-
-# Verify deployment
-./scripts/verify-deployment.sh
 ```
 
-**Expected output:**
-```
-✓ Namespace 'batchsender' exists
-✓ PostgreSQL pod is ready
-✓ DragonflyDB pod is ready
-✓ NATS pods ready (3/3 replicas)
-✓ ClickHouse pod is ready
-✓ Worker deployment is available
-✓ Worker replicas ready (2)
-✓ KEDA ScaledObject is ready
-✓ Health endpoint responding
-✓ Metrics endpoint responding
-```
-
-### Step 4: Set Up GitOps CI/CD (10 minutes)
-
-Add kubeconfig to GitHub Secrets:
-
+### Step 4: Update GitHub Secret
 ```bash
 # Encode kubeconfig
 base64 -i kubeconfig
 
-# Go to GitHub:
-# Settings → Secrets and variables → Actions → New repository secret
-# Name: KUBECONFIG
-# Value: <paste the base64 output>
+# Update GitHub Secret:
+# Go to: https://github.com/ejkkan/offsenda/settings/secrets/actions
+# Update KUBECONFIG with the new base64 value
 ```
 
-Test deployment:
-
+### Step 5: Verify Deployment
 ```bash
-# Make a small change and push
-git commit --allow-empty -m "Test CI/CD pipeline"
-git push origin main
-
-# Watch deployment
-# https://github.com/your-org/batchsender/actions
+./scripts/verify-deployment.sh
 ```
+
+**Total time:** ~15 minutes
 
 ---
 
-## Daily Operations (GitOps)
+## 🔄 Tear Down Cluster
 
-### Deploying Changes
-
-```bash
-# Make changes to code or configs
-vim apps/worker/src/something.ts
-
-# Commit and push
-git add .
-git commit -m "Update feature"
-git push origin main
-
-# GitHub Actions automatically:
-# 1. Builds Docker image
-# 2. Pushes to ghcr.io
-# 3. Applies K8s manifests
-# 4. Waits for rollout
-# 5. Verifies deployment
-
-# No manual kubectl needed!
-```
-
-### Updating Secrets
+To completely destroy the cluster:
 
 ```bash
-# Edit .env.prod
-vim .env.prod
-
-# Re-encrypt
-./scripts/seal-secrets.sh
-
-# Commit and push
-git add k8s/base/*/sealed-secrets.yaml
-git commit -m "Update production secrets"
-git push origin main
-
-# Restart worker to pick up new secrets
-kubectl rollout restart deployment/worker -n batchsender
+hetzner-k3s delete --config cluster-config.yaml
 ```
 
-### Scaling Configuration
+**This will:**
+- Delete all Hetzner servers
+- Remove all data on those servers
+- Clean up Hetzner load balancers
+- **Cost drops to €0** (except external services like Neon)
 
-KEDA automatically scales workers based on NATS queue depth:
+**What's NOT deleted:**
+- External PostgreSQL (Neon) - data is safe
+- Docker images (ghcr.io) - images are safe
+- Your Git repository - everything in Git is safe
 
-- **Min replicas:** 2
-- **Max replicas:** 50
-- **Scale up:** When >1000 messages per worker
-- **Scale down:** 30s cooldown after queue is empty
+---
 
-To adjust scaling:
+## 🔐 Important Findings & Gotchas
 
+### 1. Environment Variable Names
+**CRITICAL:** The worker code expects specific environment variable names:
+
+```bash
+# ❌ WRONG (what we initially used)
+REDIS_URL=...
+NATS_URL=...
+CLICKHOUSE_HOST=...
+
+# ✅ CORRECT (what the code actually reads)
+DRAGONFLY_URL=dragonfly.batchsender.svc:6379
+NATS_CLUSTER=nats://nats.batchsender.svc:4222
+CLICKHOUSE_URL=http://clickhouse.batchsender.svc:8123
+```
+
+See `apps/worker/src/config.ts` for the full list of expected variable names.
+
+### 2. Docker Image Architecture
+**CRITICAL:** Must build for `linux/amd64`, not `arm64` (Mac default):
+
+```bash
+# ❌ WRONG (builds for Mac M1/M2)
+docker build -t image:latest .
+
+# ✅ CORRECT (builds for Hetzner servers)
+docker buildx build --platform linux/amd64 -t image:latest . --push
+```
+
+GitHub Actions automatically builds for amd64.
+
+### 3. GitHub Container Registry Permissions
+**Issue:** `GITHUB_TOKEN` doesn't have permission to push to packages created with personal tokens.
+
+**Solution:** Use `GH_TOKEN` secret instead:
 ```yaml
-# k8s/base/worker/keda-scaledobject.yaml
-spec:
-  minReplicaCount: 2      # Minimum workers
-  maxReplicaCount: 50     # Maximum workers
-  triggers:
-    - type: nats-jetstream
-      metadata:
-        lagThreshold: "1000"  # Messages per worker before scaling
+# .github/workflows/deploy-production.yml
+- name: Log in to GitHub Container Registry
+  uses: docker/login-action@v3
+  with:
+    registry: ghcr.io
+    username: ${{ github.actor }}
+    password: ${{ secrets.GH_TOKEN }}  # NOT secrets.GITHUB_TOKEN
 ```
 
-### Rollback
+### 4. Sealed Secrets and Manual Secrets Conflict
+**Issue:** If you manually create a secret, sealed-secrets can't overwrite it.
 
+**Error:**
+```
+failed update: Resource "clickhouse-secrets" already exists and is not managed by SealedSecret
+```
+
+**Solution:** Delete the manual secret first:
 ```bash
-# Revert to previous version
-git revert <commit-sha>
-git push origin main
+kubectl delete secret clickhouse-secrets -n batchsender
+kubectl apply -f k8s/base/clickhouse/sealed-secrets.yaml
+```
 
-# Or manually rollback
-kubectl rollout undo deployment/worker -n batchsender
+### 5. Hetzner Primary IP Limits
+**Issue:** New Hetzner accounts have a 3 Primary IP limit.
+
+**Impact:**
+- 3-master HA cluster = uses 3 IPs
+- Can't add worker nodes without IP limit increase
+
+**Solution:**
+- Request IP limit increase via Hetzner support (takes 2-4 hours)
+- Or use 1-master test cluster (2 IPs total: 1 master + workers)
+
+### 6. Server Type Availability by Location
+**Finding:** Not all server types are available in all locations.
+
+**Example:**
+- `cpx21` → NOT available in nbg1, hel1
+- `cpx22` → Available in fsn1, hel1 (€6.99/mo, better than cpx21!)
+
+**Check availability:**
+```bash
+curl -H "Authorization: Bearer $HCLOUD_TOKEN" \
+  https://api.hetzner.cloud/v1/server_types
 ```
 
 ---
 
-## Accessing Services
+## 🎯 Next Steps & Options
 
-### Grafana Dashboards
+### Option 1: Expose Public API (LoadBalancer - Simplest)
+
+**Time:** 5 minutes
+**Cost:** +€5/mo
+
+Change the worker service to LoadBalancer:
+
+```bash
+kubectl patch service worker -n batchsender -p '{"spec":{"type":"LoadBalancer"}}'
+
+# Get public IP
+kubectl get service worker -n batchsender
+```
+
+**Result:** Access API at `http://<EXTERNAL-IP>:80`
+
+**Pros:**
+- Simple, works immediately
+- No domain needed
+
+**Cons:**
+- IP address instead of domain name
+- No SSL (HTTP only)
+- Costs €5/mo for load balancer
+
+---
+
+### Option 2: Expose Public API (Ingress + Domain - Better)
+
+**Time:** 15 minutes
+**Cost:** Domain only (~€10/year)
+
+1. **Buy a domain** (e.g., `yourdomain.com`)
+
+2. **Install Traefik Ingress** (already configured in plan):
+```bash
+helm repo add traefik https://traefik.github.io/charts
+helm install traefik traefik/traefik -n kube-system
+```
+
+3. **Create Ingress resource:**
+```yaml
+# k8s/base/worker/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: worker-ingress
+  namespace: batchsender
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  rules:
+  - host: api.yourdomain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: worker
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - api.yourdomain.com
+    secretName: worker-tls
+```
+
+4. **Point domain DNS** to load balancer IP:
+```bash
+kubectl get service traefik -n kube-system
+# Create A record: api.yourdomain.com → <EXTERNAL-IP>
+```
+
+**Result:** Access API at `https://api.yourdomain.com` with automatic SSL!
+
+**Pros:**
+- Clean domain name
+- Automatic SSL certificates (Let's Encrypt)
+- Professional setup
+
+**Cons:**
+- Need to buy domain
+- Slightly more complex setup
+
+---
+
+### Option 3: Scale to 3-Master HA Setup
+
+**Prerequisites:** Hetzner IP limit increased to 10
+
+**Steps:**
+1. Edit `cluster-config.yaml`:
+```yaml
+masters_pool:
+  instance_type: cpx22
+  instance_count: 3  # Change from 1 to 3
+  locations:
+    - fsn1
+    - nbg1  # Add second location
+    - hel1  # Add third location
+```
+
+2. Upgrade cluster:
+```bash
+hetzner-k3s upgrade --config cluster-config.yaml
+```
+
+**Result:**
+- High availability (cluster survives 1 master failure)
+- Masters spread across 3 datacenters
+- Cost: +€14/mo (2 additional masters)
+
+---
+
+### Option 4: Add Monitoring Dashboard Access
+
+**Time:** 5 minutes
+
+Access Grafana dashboard:
 
 ```bash
 # Port-forward Grafana
-kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80
+kubectl port-forward -n kube-system svc/kube-prometheus-stack-grafana 3000:80
 
 # Get admin password
-kubectl get secret -n monitoring monitoring-grafana -o jsonpath='{.data.admin-password}' | base64 -d
-
-# Open browser: http://localhost:3000
-# Username: admin
-# Password: <from above command>
+kubectl get secret -n kube-system kube-prometheus-stack-grafana \
+  -o jsonpath='{.data.admin-password}' | base64 -d && echo
 ```
 
-**Recommended Dashboards:**
-- NATS JetStream: ID 13797
-- ClickHouse: ID 14999
-- Worker metrics: Custom (use /api/metrics)
+Open browser: `http://localhost:3000`
+- Username: `admin`
+- Password: <from command above>
 
-### Worker Logs
-
+**Or expose publicly:**
 ```bash
-# Follow worker logs
-kubectl logs -f deployment/worker -n batchsender
-
-# Filter for errors
-kubectl logs deployment/worker -n batchsender | grep ERROR
-
-# Last 100 lines
-kubectl logs --tail=100 deployment/worker -n batchsender
-```
-
-### ClickHouse Query
-
-```bash
-# Connect to ClickHouse
-kubectl exec -it clickhouse-0 -n batchsender -- clickhouse-client
-
-# Example queries
-SELECT count() FROM email_events;
-SELECT status, count() FROM email_events GROUP BY status;
-SELECT toDate(timestamp) as date, count() FROM email_events GROUP BY date ORDER BY date DESC LIMIT 7;
-```
-
-### NATS Monitoring
-
-```bash
-# Port-forward NATS monitor
-kubectl port-forward -n batchsender svc/nats 8222:8222
-
-# Open browser: http://localhost:8222
-# Or curl: curl http://localhost:8222/varz
+kubectl patch service kube-prometheus-stack-grafana -n kube-system \
+  -p '{"spec":{"type":"LoadBalancer"}}'
 ```
 
 ---
 
-## Troubleshooting
+## 📝 GitOps Workflow (Current Setup)
 
-### Pods Not Starting
+Your deployment is fully automated! Here's the workflow:
 
+### Making Code Changes
 ```bash
-# Check pod status
-kubectl get pods -n batchsender
+# 1. Make changes
+vim apps/worker/src/index.ts
 
-# Describe failed pod
-kubectl describe pod <pod-name> -n batchsender
-
-# Check events
-kubectl get events -n batchsender --sort-by='.lastTimestamp'
+# 2. Commit and push
+git add .
+git commit -m "Update worker logic"
+git push origin main
 ```
 
-### Worker Not Scaling
+**What happens automatically:**
+1. ✅ GitHub Actions triggered
+2. ✅ Docker image built (amd64)
+3. ✅ Image pushed to ghcr.io/ejkkan/batchsender-worker:latest
+4. ✅ Kubernetes manifests applied
+5. ✅ Worker pods rolling update
+6. ✅ Health checks verified
+7. ✅ KEDA autoscaling activated
 
+**Watch it:** https://github.com/ejkkan/offsenda/actions
+
+### Updating Secrets
 ```bash
-# Check KEDA ScaledObject
-kubectl get scaledobject -n batchsender
-kubectl describe scaledobject worker-scaler -n batchsender
+# 1. Edit .env.prod
+vim .env.prod
 
-# Check KEDA operator logs
-kubectl logs -n keda deploy/keda-operator
+# 2. Re-encrypt secrets
+./scripts/seal-secrets.sh
 
-# Verify NATS metrics endpoint
-kubectl exec nats-0 -n batchsender -- curl localhost:8222/metrics
+# 3. Commit and push
+git add k8s/base/*/sealed-secrets.yaml
+git commit -m "Update production secrets"
+git push origin main
 ```
 
-### Deployment Stuck
+Sealed secrets are automatically decrypted by the cluster!
 
+### Workflow Triggers
+The workflow runs when you push changes to:
+- `apps/worker/**` (worker code)
+- `k8s/**` (Kubernetes manifests)
+- `.github/workflows/deploy-production.yml` (workflow itself)
+
+**Manual trigger:** https://github.com/ejkkan/offsenda/actions/workflows/deploy-production.yml → "Run workflow"
+
+---
+
+## 🔍 Troubleshooting
+
+### Workers Not Starting
+
+**Check logs:**
 ```bash
-# Check rollout status
-kubectl rollout status deployment/worker -n batchsender
-
-# Check replica sets
-kubectl get rs -n batchsender
-
-# Force restart
-kubectl rollout restart deployment/worker -n batchsender
+kubectl logs -n batchsender -l app=worker --tail=50
 ```
 
-### Secrets Not Working
+**Common issues:**
+- Missing environment variables (check configmap)
+- Wrong variable names (NATS_CLUSTER vs NATS_URL)
+- Image pull errors (check ghcr.io package is public)
+- Resource limits (cluster out of CPU/memory)
 
+### ClickHouse Authentication Errors
+
+**Error:** `Authentication failed: password is incorrect`
+
+**Cause:** Sealed secret didn't overwrite manual secret
+
+**Fix:**
 ```bash
-# Verify sealed secret exists
-kubectl get sealedsecret -n batchsender
+kubectl delete secret clickhouse-secrets -n batchsender
+kubectl apply -f k8s/base/clickhouse/sealed-secrets.yaml
+kubectl delete pod clickhouse-0 -n batchsender
+```
 
-# Check if secret was created
-kubectl get secret worker-secrets -n batchsender
+### KEDA Not Scaling
 
-# Describe sealed secret
-kubectl describe sealedsecret worker-secrets -n batchsender
+**Check ScaledObject:**
+```bash
+kubectl get scaledobject worker-scaler -n batchsender
 
-# Check sealed-secrets controller logs
-kubectl logs -n kube-system -l app.kubernetes.io/name=sealed-secrets
+# Should show READY=True
+```
+
+**Check KEDA logs:**
+```bash
+kubectl logs -n keda -l app=keda-operator --tail=50
+```
+
+**Common issues:**
+- Secret not found (worker-secrets missing)
+- NATS connection failed (check NATS_CLUSTER variable)
+
+### GitHub Actions Failing
+
+**Error:** `permission_denied: write_package`
+
+**Fix:** Make sure `GH_TOKEN` secret is set (not `GITHUB_TOKEN`)
+
+**Error:** `no match for platform in manifest`
+
+**Fix:** Image built for wrong architecture (arm64 vs amd64)
+```bash
+docker buildx build --platform linux/amd64 ...
+```
+
+### Image Pull Errors
+
+**Error:** `401 Unauthorized` or `403 Forbidden`
+
+**Fix:** Make ghcr.io package public
+- Go to: https://github.com/users/ejkkan/packages/container/batchsender-worker/settings
+- Change visibility to Public
+
+### Cluster Autoscaler Not Adding Nodes
+
+**Issue:** Hetzner Primary IP limit (3 IPs for new accounts)
+
+**Check:** https://console.hetzner.cloud → Project → Limits
+
+**Fix:** Request IP limit increase via support ticket
+
+---
+
+## 📂 Important Files Reference
+
+### Configuration Files
+- `cluster-config.yaml` - Hetzner k3s cluster definition
+- `.env.hetzner` - Hetzner API token (**keep safe, not in Git**)
+- `.env.prod` - Production secrets (**CRITICAL - backup this file!**)
+- `kubeconfig` - Kubernetes access credentials (regenerated with each cluster)
+
+### Kubernetes Manifests
+- `k8s/base/` - Base configurations for all environments
+- `k8s/overlays/production/` - Production-specific overrides
+- `k8s/base/worker/configmap.yaml` - Worker environment variables
+- `k8s/base/worker/sealed-secrets.yaml` - Encrypted worker secrets
+
+### Scripts
+- `scripts/bootstrap-infrastructure.sh` - Install KEDA, Prometheus, etc.
+- `scripts/seal-secrets.sh` - Encrypt secrets from .env.prod
+- `scripts/verify-deployment.sh` - Test production deployment
+
+### GitHub Workflows
+- `.github/workflows/deploy-production.yml` - Automated CI/CD pipeline
+
+---
+
+## 📞 Support & Resources
+
+### Hetzner Cloud
+- Console: https://console.hetzner.cloud
+- API Docs: https://docs.hetzner.cloud/
+- Community: https://community.hetzner.com/
+
+### hetzner-k3s
+- GitHub: https://github.com/vitobotta/hetzner-k3s
+- Documentation: https://hetzner-k3s.com/
+
+### Kubernetes
+- kubectl cheatsheet: https://kubernetes.io/docs/reference/kubectl/cheatsheet/
+- KEDA docs: https://keda.sh/docs/
+- Sealed Secrets: https://sealed-secrets.netlify.app/
+
+### Current Cluster Info
+```bash
+# Cluster endpoint
+kubectl cluster-info
+
+# Current context
+kubectl config current-context
+
+# Get all resources
+kubectl get all -n batchsender
 ```
 
 ---
 
-## Monitoring & Alerts
+## 🎓 Key Learnings from Initial Deployment
 
-See [MONITORING.md](./MONITORING.md) for detailed monitoring setup.
-
-## Operational Procedures
-
-See [RUNBOOK.md](./RUNBOOK.md) for common operational tasks and troubleshooting.
-
----
-
-## Cost Management
-
-### Current Cost Breakdown
-
-**Hetzner Cloud:**
-- Control Plane (1x cx21): ~€5/mo
-- Worker Nodes (1-3x cx31): €15-30/mo
-- Load Balancer: €5/mo
-- **Subtotal: €25-40/mo**
-
-**External Services:**
-- Neon PostgreSQL: $0-19/mo
-- Backblaze B2: ~€5/mo
-- **Subtotal: €5-24/mo**
-
-**Total: €30-64/mo**
-
-### Cost Optimization
-
-```bash
-# Reduce minimum workers (off-peak hours)
-kubectl patch scaledobject worker-scaler -n batchsender \
-  --type='json' -p='[{"op": "replace", "path": "/spec/minReplicaCount", "value": 1}]'
-
-# Scale nodes during low usage
-# (Configure auto-scaler in Terraform)
-```
+1. **Server type availability varies by region** - Always check API for current availability
+2. **Use cpx22 instead of cpx21** - Better availability, similar price (€6.99 vs €6.39)
+3. **Environment variable names matter** - Code expects specific names (NATS_CLUSTER, not NATS_URL)
+4. **Build for correct architecture** - Hetzner uses amd64, not arm64
+5. **Sealed secrets can't overwrite manual secrets** - Delete manual secrets first
+6. **GitHub token permissions** - Use personal token (GH_TOKEN), not GITHUB_TOKEN
+7. **Primary IP limits are real** - Request increase early if planning HA setup
+8. **GitOps is powerful** - Once set up, deployments are just `git push`
 
 ---
 
-## Next Steps
+## ✅ Deployment Checklist
 
-- Set up DNS and public API endpoint (see [k8s/ingress/worker-ingress.yaml](k8s/ingress/worker-ingress.yaml))
-- Configure alerts in Grafana
-- Set up backups (ClickHouse CronJob already configured)
-- Review security policies (NetworkPolicy, RBAC)
+### Initial Setup
+- [ ] Hetzner account created
+- [ ] API token generated and saved in `.env.hetzner`
+- [ ] `.env.prod` created with production secrets
+- [ ] Tools installed (hetzner-k3s, kubectl, helm, kubeseal)
+- [ ] GitHub repository created
+- [ ] GitHub secrets configured (KUBECONFIG, GH_TOKEN)
+
+### Cluster Creation
+- [ ] Cluster created with `hetzner-k3s create`
+- [ ] Infrastructure installed with bootstrap script
+- [ ] Application deployed with `kubectl apply`
+- [ ] Verification script passed
+- [ ] GitHub Actions workflow successful
+
+### Production Ready
+- [ ] Workers running and healthy
+- [ ] KEDA autoscaling active
+- [ ] ClickHouse authentication working
+- [ ] NATS connection established
+- [ ] Monitoring dashboards accessible
+- [ ] GitOps workflow tested (push to deploy)
+
+### Optional
+- [ ] Public API exposed (LoadBalancer or Ingress)
+- [ ] Custom domain configured
+- [ ] SSL certificates working
+- [ ] Scaled to 3-master HA setup
+- [ ] Monitoring alerts configured
 
 ---
 
-## Support
+**🎉 You now have a production-ready Kubernetes cluster with full GitOps automation!**
 
-For issues or questions:
-- Check [RUNBOOK.md](./RUNBOOK.md) for common problems
-- Review logs: `kubectl logs -f deployment/worker -n batchsender`
-- Check monitoring: Grafana dashboards
-- GitHub Issues: https://github.com/your-org/batchsender/issues
+**Next Agent:** Everything you need to know is documented above. The cluster is running and operational. Choose one of the "Next Steps" options to continue improving the deployment.
