@@ -39,11 +39,10 @@ data:
           - target_label: __metrics_path__
             replacement: /api/metrics
 
-      # Scrape NATS metrics
+      # Scrape NATS metrics via prometheus-nats-exporter
       - job_name: 'nats'
         static_configs:
-          - targets: ['nats:8222']
-        metrics_path: /metrics
+          - targets: ['nats-exporter:7777']
 
 ---
 apiVersion: apps/v1
