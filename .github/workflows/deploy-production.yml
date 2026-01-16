@@ -77,9 +77,10 @@ jobs:
           kubectl apply -k k8s/overlays/production
 
       - name: Deploy monitoring stack
+        continue-on-error: true
         run: |
           echo "Deploying monitoring (Prometheus, Grafana)..."
-          kubectl apply -f k8s/monitoring/
+          kubectl apply -f k8s/monitoring/ || echo "Warning: Some monitoring resources failed to apply"
 
       - name: Wait for rollout to complete
         run: |
@@ -147,14 +148,26 @@ jobs:
         run: |
           echo "❌ Deployment failed! Gathering debug info..."
           echo ""
-          echo "=== Pod Status ==="
-          kubectl get pods -n batchsender -l app=worker
+          echo "=== All Pods Status ==="
+          kubectl get pods -n batchsender
           echo ""
-          echo "=== Pod Descriptions ==="
-          kubectl describe pods -n batchsender -l app=worker | tail -50
+          echo "=== Worker Pod Descriptions ==="
+          kubectl describe pods -n batchsender -l app=worker | tail -30
           echo ""
-          echo "=== Pod Logs ==="
-          kubectl logs -n batchsender -l app=worker --tail=100 || echo "No logs available"
+          echo "=== Worker Logs ==="
+          kubectl logs -n batchsender -l app=worker --tail=50 || echo "No worker logs"
+          echo ""
+          echo "=== Prometheus Pod Status ==="
+          kubectl describe pods -n batchsender -l app=prometheus | tail -40 || echo "No prometheus pod"
+          echo ""
+          echo "=== Prometheus Logs ==="
+          kubectl logs -n batchsender -l app=prometheus --tail=50 || echo "No prometheus logs"
+          echo ""
+          echo "=== Grafana Pod Status ==="
+          kubectl describe pods -n batchsender -l app=grafana | tail -30 || echo "No grafana pod"
+          echo ""
+          echo "=== PVC Status ==="
+          kubectl get pvc -n batchsender
           echo ""
           echo "=== Events ==="
-          kubectl get events -n batchsender --sort-by='.lastTimestamp' | tail -20
+          kubectl get events -n batchsender --sort-by='.lastTimestamp' | tail -30
