@@ -84,5 +84,14 @@ jobs:
 
       - name: Verify deployment
         run: |
+          echo "=== Web Pods ==="
           kubectl get pods -n batchsender -l app=web
+          echo ""
+          echo "=== Web Ingress ==="
           kubectl get ingress -n batchsender web-ingress
+          echo ""
+          echo "=== Web Pod Details ==="
+          kubectl describe pods -n batchsender -l app=web | tail -50
+          echo ""
+          echo "=== Web Pod Logs ==="
+          kubectl logs -n batchsender -l app=web --tail=30 || echo "No logs available"
