@@ -76,6 +76,11 @@ jobs:
         run: |
           kubectl apply -k k8s/overlays/production
 
+      - name: Deploy monitoring stack
+        run: |
+          echo "Deploying monitoring (Prometheus, Grafana)..."
+          kubectl apply -f k8s/monitoring/
+
       - name: Wait for rollout to complete
         run: |
           kubectl rollout status deployment/worker -n batchsender --timeout=5m
