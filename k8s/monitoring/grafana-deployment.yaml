@@ -62,6 +62,19 @@ data:
           sslmode: require
           postgresVersion: 1600
         editable: false
+      - name: Loki
+        type: loki
+        uid: loki
+        access: proxy
+        url: http://loki:3100
+        jsonData:
+          maxLines: 1000
+          derivedFields:
+            - name: TraceID
+              matcherRegex: '"traceId":"([^"]+)"'
+              url: ''
+              datasourceUid: loki
+        editable: false
 
 ---
 apiVersion: v1
@@ -641,7 +654,11 @@ spec:
         - name: grafana-dashboard-providers
           mountPath: /etc/grafana/provisioning/dashboards
         - name: grafana-dashboards
-          mountPath: /var/lib/grafana/dashboards
+          mountPath: /var/lib/grafana/dashboards/batchsender.json
+          subPath: batchsender.json
+        - name: grafana-logs-dashboard
+          mountPath: /var/lib/grafana/dashboards/logs.json
+          subPath: logs.json
         - name: grafana-storage
           mountPath: /var/lib/grafana
         resources:
@@ -676,6 +693,9 @@ spec:
       - name: grafana-dashboards
         configMap:
           name: grafana-dashboards
+      - name: grafana-logs-dashboard
+        configMap:
+          name: grafana-logs-dashboard
       - name: grafana-storage
         persistentVolumeClaim:
           claimName: grafana-pvc

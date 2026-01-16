@@ -1,7 +1,66 @@
 import pino from "pino";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomBytes } from "node:crypto";
 import { config } from "./config.js";
 
 const isDev = config.NODE_ENV !== "production";
+
+// =============================================================================
+// Trace Context (Correlation IDs)
+// =============================================================================
+// AsyncLocalStorage allows us to automatically propagate traceId through
+// async operations without manually passing it everywhere.
+//
+// Usage:
+//   withTrace(() => {
+//     log.batch.info({ batchId }, "processing"); // traceId added automatically
+//     await processEmails();                      // all nested logs get same traceId
+//   });
+//
+// Or with existing traceId (from NATS message metadata):
+//   withTrace(() => { ... }, existingTraceId);
+// =============================================================================
+
+interface TraceContext {
+  traceId: string;
+}
+
+const traceStorage = new AsyncLocalStorage<TraceContext>();
+
+/**
+ * Generate a short, unique trace ID (12 chars, base62)
+ * Format: xxxxxxxxxxxx (e.g., "a1B2c3D4e5F6")
+ */
+export function generateTraceId(): string {
+  return randomBytes(9).toString("base64url").slice(0, 12);
+}
+
+/**
+ * Get the current trace ID from context, or undefined if not in a trace
+ */
+export function getTraceId(): string | undefined {
+  return traceStorage.getStore()?.traceId;
+}
+
+/**
+ * Run a function with a trace context. All logs within will include the traceId.
+ * If no traceId is provided, a new one is generated.
+ */
+export function withTrace<T>(fn: () => T, traceId?: string): T {
+  const ctx: TraceContext = { traceId: traceId ?? generateTraceId() };
+  return traceStorage.run(ctx, fn);
+}
+
+/**
+ * Async version of withTrace for async functions
+ */
+export async function withTraceAsync<T>(
+  fn: () => Promise<T>,
+  traceId?: string
+): Promise<T> {
+  const ctx: TraceContext = { traceId: traceId ?? generateTraceId() };
+  return traceStorage.run(ctx, fn);
+}
 
 // =============================================================================
 // Structured Logger
@@ -32,6 +91,12 @@ const baseConfig: pino.LoggerOptions = {
 
   // Timestamp format
   timestamp: pino.stdTimeFunctions.isoTime,
+
+  // Mixin adds traceId to every log entry automatically
+  mixin() {
+    const traceId = traceStorage.getStore()?.traceId;
+    return traceId ? { traceId } : {};
+  },
 };
 
 // Create the base logger - use pretty printing in development

@@ -1,0 +1,190 @@
+# =============================================================================
+# Loki - Log Aggregation System
+# =============================================================================
+# Loki stores logs in Backblaze B2 (S3-compatible) for durability and cost efficiency.
+# Logs are indexed by labels only (not full-text), keeping storage costs low.
+#
+# Query logs in Grafana using LogQL:
+#   {app="worker"} |= "error"
+#   {app="worker", component="batch"} | json | batchId="abc-123"
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: batchsender
+data:
+  loki.yaml: |
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9096
+      log_level: info
+
+    common:
+      path_prefix: /loki
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+
+    schema_config:
+      configs:
+        - from: 2024-01-01
+          store: tsdb
+          object_store: s3
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+
+    storage_config:
+      tsdb_shipper:
+        active_index_directory: /loki/tsdb-index
+        cache_location: /loki/tsdb-cache
+
+      aws:
+        # Backblaze B2 S3-compatible endpoint
+        # Format: s3.{region}.backblazeb2.com
+        endpoint: s3.us-west-004.backblazeb2.com
+        bucketnames: batchsender-loki-logs
+        access_key_id: ${B2_ACCESS_KEY_ID}
+        secret_access_key: ${B2_SECRET_ACCESS_KEY}
+        s3forcepathstyle: true
+        insecure: false
+
+    limits_config:
+      retention_period: 30d
+      ingestion_rate_mb: 10
+      ingestion_burst_size_mb: 20
+      max_streams_per_user: 10000
+      max_line_size: 256kb
+
+    compactor:
+      working_directory: /loki/compactor
+      delete_request_store: s3
+      retention_enabled: true
+      retention_delete_delay: 2h
+      compaction_interval: 10m
+
+    ruler:
+      alertmanager_url: http://alertmanager:9093
+      storage:
+        type: local
+        local:
+          directory: /loki/rules
+      rule_path: /loki/rules-temp
+      enable_api: true
+
+    query_range:
+      results_cache:
+        cache:
+          embedded_cache:
+            enabled: true
+            max_size_mb: 100
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: loki
+  namespace: batchsender
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  serviceName: loki
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loki
+  template:
+    metadata:
+      labels:
+        app: loki
+      annotations:
+        reloader.stakater.com/auto: "true"
+    spec:
+      securityContext:
+        fsGroup: 10001
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: loki
+          image: grafana/loki:2.9.4
+          args:
+            - -config.file=/etc/loki/loki.yaml
+            - -config.expand-env=true
+          ports:
+            - name: http
+              containerPort: 3100
+            - name: grpc
+              containerPort: 9096
+          env:
+            - name: B2_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: loki-b2-credentials
+                  key: access-key-id
+            - name: B2_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: loki-b2-credentials
+                  key: secret-access-key
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki
+            - name: data
+              mountPath: /loki
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      volumes:
+        - name: config
+          configMap:
+            name: loki-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: hcloud-volumes
+        resources:
+          requests:
+            # Local storage for index cache and temporary files
+            # Actual logs are stored in B2
+            storage: 10Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: batchsender
+spec:
+  selector:
+    app: loki
+  ports:
+    - name: http
+      port: 3100
+      targetPort: 3100
+    - name: grpc
+      port: 9096
+      targetPort: 9096

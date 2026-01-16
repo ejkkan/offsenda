@@ -1,0 +1,201 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-logs-dashboard
+  namespace: batchsender
+data:
+  logs.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "liveNow": true,
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+          "id": 100,
+          "panels": [],
+          "title": "Log Stream",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "gridPos": { "h": 12, "w": 24, "x": 0, "y": 1 },
+          "id": 1,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": true,
+            "showCommonLabels": false,
+            "showLabels": false,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": true
+          },
+          "targets": [{
+            "datasource": { "type": "loki", "uid": "loki" },
+            "expr": "{namespace=\"batchsender\", app=~\"$app\"} |= \"$search\" | json",
+            "refId": "A"
+          }],
+          "title": "Live Logs",
+          "type": "logs"
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 },
+          "id": 101,
+          "panels": [],
+          "title": "Error Analysis",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 6, "w": 12, "x": 0, "y": 14 },
+          "id": 10,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [{
+            "datasource": { "type": "loki", "uid": "loki" },
+            "expr": "sum by (component) (count_over_time({namespace=\"batchsender\", level=\"error\"} [$__interval]))",
+            "legendFormat": "{{component}}",
+            "refId": "A"
+          }],
+          "title": "Errors by Component",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": { "drawStyle": "bars", "fillOpacity": 80, "stacking": { "mode": "normal" } },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 14 },
+          "id": 11,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [{
+            "datasource": { "type": "loki", "uid": "loki" },
+            "expr": "sum by (level) (count_over_time({namespace=\"batchsender\"} | json [$__interval]))",
+            "legendFormat": "{{level}}",
+            "refId": "A"
+          }],
+          "title": "Log Volume by Level",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+          "id": 20,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": true,
+            "showCommonLabels": false,
+            "showLabels": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": true
+          },
+          "targets": [{
+            "datasource": { "type": "loki", "uid": "loki" },
+            "expr": "{namespace=\"batchsender\", level=\"error\"} | json",
+            "refId": "A"
+          }],
+          "title": "Recent Errors",
+          "type": "logs"
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 },
+          "id": 102,
+          "panels": [],
+          "title": "Trace Explorer",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 29 },
+          "id": 30,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": true,
+            "showCommonLabels": false,
+            "showLabels": true,
+            "showTime": true,
+            "sortOrder": "Ascending",
+            "wrapLogMessage": true
+          },
+          "targets": [{
+            "datasource": { "type": "loki", "uid": "loki" },
+            "expr": "{namespace=\"batchsender\"} |= \"$traceId\" | json",
+            "refId": "A"
+          }],
+          "title": "Trace Timeline (enter traceId above)",
+          "type": "logs"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "tags": ["batchsender", "logs", "loki"],
+      "templating": {
+        "list": [
+          {
+            "current": { "selected": true, "text": "worker", "value": "worker" },
+            "hide": 0,
+            "includeAll": true,
+            "multi": true,
+            "name": "app",
+            "options": [
+              { "selected": true, "text": "All", "value": "$__all" },
+              { "selected": false, "text": "worker", "value": "worker" },
+              { "selected": false, "text": "web", "value": "web" },
+              { "selected": false, "text": "nats", "value": "nats" },
+              { "selected": false, "text": "clickhouse", "value": "clickhouse" }
+            ],
+            "query": "worker,web,nats,clickhouse",
+            "queryValue": "",
+            "skipUrlSync": false,
+            "type": "custom"
+          },
+          {
+            "current": { "selected": false, "text": "", "value": "" },
+            "hide": 0,
+            "name": "search",
+            "options": [],
+            "query": "",
+            "skipUrlSync": false,
+            "type": "textbox",
+            "label": "Search"
+          },
+          {
+            "current": { "selected": false, "text": "", "value": "" },
+            "hide": 0,
+            "name": "traceId",
+            "options": [],
+            "query": "",
+            "skipUrlSync": false,
+            "type": "textbox",
+            "label": "Trace ID"
+          }
+        ]
+      },
+      "time": { "from": "now-1h", "to": "now" },
+      "timepicker": {},
+      "timezone": "",
+      "title": "BatchSender Logs",
+      "uid": "batchsender-logs",
+      "version": 1
+    }
