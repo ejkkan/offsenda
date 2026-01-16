@@ -5,6 +5,8 @@ metadata:
   namespace: batchsender
   labels:
     app: worker
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   # Replicas managed by HPA - do not set replicas here
   selector:
@@ -14,6 +16,8 @@ spec:
     metadata:
       labels:
         app: worker
+      annotations:
+        reloader.stakater.com/auto: "true"
     spec:
       imagePullSecrets:
       - name: ghcr-credentials

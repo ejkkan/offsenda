@@ -5,6 +5,8 @@ metadata:
   namespace: batchsender
   labels:
     app: nats
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   replicas: 3
   serviceName: nats

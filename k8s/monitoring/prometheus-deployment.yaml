@@ -69,6 +69,8 @@ kind: Deployment
 metadata:
   name: prometheus
   namespace: batchsender
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   replicas: 1
   selector:
@@ -78,6 +80,8 @@ spec:
     metadata:
       labels:
         app: prometheus
+      annotations:
+        reloader.stakater.com/auto: "true"
     spec:
       serviceAccountName: prometheus
       securityContext:

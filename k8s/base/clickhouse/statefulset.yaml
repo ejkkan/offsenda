@@ -5,6 +5,8 @@ metadata:
   namespace: batchsender
   labels:
     app: clickhouse
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   serviceName: clickhouse-headless
   replicas: 1  # Scale up to 3 when needed

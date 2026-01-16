@@ -587,6 +587,8 @@ kind: Deployment
 metadata:
   name: grafana
   namespace: batchsender
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   replicas: 1
   selector:
@@ -596,6 +598,8 @@ spec:
     metadata:
       labels:
         app: grafana
+      annotations:
+        reloader.stakater.com/auto: "true"
     spec:
       securityContext:
         fsGroup: 472
