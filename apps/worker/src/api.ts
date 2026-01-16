@@ -69,9 +69,10 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   // Auth middleware
   app.addHook("preHandler", async (request, reply) => {
     // Skip auth for health check, metrics, and webhooks
-    // Use startsWith to handle query strings and be more robust
+    // Support both /metrics and /api/metrics for Prometheus compatibility
     if (
       request.url === "/health" ||
+      request.url.startsWith("/metrics") ||
       request.url.startsWith("/api/metrics") ||
       request.url.startsWith("/webhooks")
     ) {
@@ -778,7 +779,8 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   });
 
   // Metrics endpoint (for monitoring systems)
-  app.get("/api/metrics", async (request, reply) => {
+  // Support both /metrics and /api/metrics for Prometheus compatibility
+  const metricsHandler = async (request: any, reply: any) => {
     try {
       // Update NATS queue depth metrics (for KEDA autoscaling)
       const natsMetrics = await collectNatsMetrics(natsClient);
@@ -817,5 +819,8 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
       log.api.error({ error }, "Failed to collect metrics");
       return reply.status(500).send({ error: "Failed to collect metrics" });
     }
-  });
+  };
+
+  app.get("/metrics", metricsHandler);
+  app.get("/api/metrics", metricsHandler);
 }
