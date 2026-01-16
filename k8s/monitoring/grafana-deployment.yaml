@@ -122,7 +122,7 @@ data:
           "targets": [{
             "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
             "queryType": "sql",
-            "rawSql": "SELECT count() as value FROM email_events WHERE event_type = 'sent'",
+            "rawSql": "SELECT count() as value FROM batchsender.email_events WHERE event_type = 'sent'",
             "refId": "A",
             "format": 1
           }],
@@ -207,7 +207,7 @@ data:
           "targets": [{
             "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
             "queryType": "sql",
-            "rawSql": "SELECT count(DISTINCT email) as value FROM email_events",
+            "rawSql": "SELECT count(DISTINCT email) as value FROM batchsender.email_events",
             "refId": "A",
             "format": 1
           }],
@@ -229,7 +229,7 @@ data:
           "targets": [{
             "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
             "queryType": "sql",
-            "rawSql": "SELECT count(DISTINCT user_id) as value FROM email_events",
+            "rawSql": "SELECT count(DISTINCT user_id) as value FROM batchsender.email_events",
             "refId": "A",
             "format": 1
           }],
@@ -260,7 +260,7 @@ data:
           "targets": [{
             "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
             "queryType": "sql",
-            "rawSql": "SELECT countIf(event_type='delivered') * 100.0 / nullIf(countIf(event_type='sent'), 0) as value FROM email_events",
+            "rawSql": "SELECT countIf(event_type='delivered') * 100.0 / nullIf(countIf(event_type='sent'), 0) as value FROM batchsender.email_events",
             "refId": "A",
             "format": 1
           }],
@@ -283,7 +283,7 @@ data:
           "targets": [{
             "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
             "queryType": "sql",
-            "rawSql": "SELECT countIf(event_type='bounced') * 100.0 / nullIf(countIf(event_type='sent'), 0) as value FROM email_events",
+            "rawSql": "SELECT countIf(event_type='bounced') * 100.0 / nullIf(countIf(event_type='sent'), 0) as value FROM batchsender.email_events",
             "refId": "A",
             "format": 1
           }],
@@ -306,7 +306,7 @@ data:
           "targets": [{
             "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
             "queryType": "sql",
-            "rawSql": "SELECT countIf(event_type='opened') * 100.0 / nullIf(countIf(event_type='delivered'), 0) as value FROM email_events",
+            "rawSql": "SELECT countIf(event_type='opened') * 100.0 / nullIf(countIf(event_type='delivered'), 0) as value FROM batchsender.email_events",
             "refId": "A",
             "format": 1
           }],
@@ -329,7 +329,7 @@ data:
           "targets": [{
             "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
             "queryType": "sql",
-            "rawSql": "SELECT countIf(event_type='complained') * 100.0 / nullIf(countIf(event_type='sent'), 0) as value FROM email_events",
+            "rawSql": "SELECT countIf(event_type='complained') * 100.0 / nullIf(countIf(event_type='sent'), 0) as value FROM batchsender.email_events",
             "refId": "A",
             "format": 1
           }],
@@ -353,7 +353,7 @@ data:
           "targets": [{
             "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
             "queryType": "sql",
-            "rawSql": "SELECT toStartOfDay(event_time) as time, event_type, count() as value FROM email_events WHERE event_time >= now() - INTERVAL 30 DAY GROUP BY time, event_type ORDER BY time",
+            "rawSql": "SELECT toStartOfDay(event_time) as time, event_type, count() as value FROM batchsender.email_events WHERE event_time >= now() - INTERVAL 30 DAY GROUP BY time, event_type ORDER BY time",
             "refId": "A",
             "format": 0
           }],

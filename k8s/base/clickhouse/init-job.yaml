@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clickhouse-init-schema
+  namespace: batchsender
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: init-schema
+        image: clickhouse/clickhouse-server:24-alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Waiting for ClickHouse to be ready..."
+          for i in $(seq 1 60); do
+            if clickhouse-client --host clickhouse --user $CLICKHOUSE_USER --password $CLICKHOUSE_PASSWORD --query "SELECT 1" 2>/dev/null; then
+              echo "ClickHouse is ready!"
+              break
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 5
+          done
+          echo "Running init schema..."
+          clickhouse-client --host clickhouse --user $CLICKHOUSE_USER --password $CLICKHOUSE_PASSWORD --multiquery < /init/init-schema.sql
+          echo "Done!"
+        env:
+        - name: CLICKHOUSE_USER
+          value: default
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-secrets
+              key: password
+        volumeMounts:
+        - name: init-scripts
+          mountPath: /init
+      volumes:
+      - name: init-scripts
+        configMap:
+          name: clickhouse-init

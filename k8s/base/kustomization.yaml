@@ -21,6 +21,7 @@ resources:
   - clickhouse/service.yaml
   - clickhouse/headless-service.yaml
   - clickhouse/init-configmap.yaml
+  - clickhouse/init-job.yaml
   # Migrated to External Secrets - commented out for safe transition
   - clickhouse/sealed-secrets.yaml
   - clickhouse/sealed-b2-secret.yaml
