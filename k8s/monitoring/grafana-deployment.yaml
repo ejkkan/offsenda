@@ -353,7 +353,7 @@ data:
           "targets": [{
             "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
             "queryType": "sql",
-            "rawSql": "SELECT toStartOfDay(event_time) as time, event_type, count() as value FROM batchsender.email_events WHERE event_time >= now() - INTERVAL 30 DAY GROUP BY time, event_type ORDER BY time",
+            "rawSql": "SELECT toStartOfDay(created_at) as time, event_type, count() as value FROM batchsender.email_events WHERE created_at >= now() - INTERVAL 30 DAY GROUP BY time, event_type ORDER BY time",
             "refId": "A",
             "format": 0
           }],
@@ -376,7 +376,7 @@ data:
           "options": { "legend": { "displayMode": "list", "placement": "right" }, "pieType": "pie", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "tooltip": { "mode": "single" } },
           "targets": [{
             "datasource": { "type": "postgres", "uid": "postgres" },
-            "rawSql": "SELECT module, count(*) as value FROM send_configs GROUP BY module",
+            "rawSql": "SELECT COALESCE(module, 'unknown') as module, count(*) as value FROM send_configs GROUP BY module",
             "refId": "A",
             "format": "table"
           }],
@@ -391,7 +391,7 @@ data:
           "options": { "legend": { "displayMode": "list", "placement": "right" }, "pieType": "pie", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "tooltip": { "mode": "single" } },
           "targets": [{
             "datasource": { "type": "postgres", "uid": "postgres" },
-            "rawSql": "SELECT status, count(*) as value FROM batches GROUP BY status",
+            "rawSql": "SELECT COALESCE(status, 'unknown') as status, count(*) as value FROM batches GROUP BY status",
             "refId": "A",
             "format": "table"
           }],
@@ -450,7 +450,7 @@ data:
           "gridPos": { "h": 4, "w": 4, "x": 8, "y": 27 },
           "id": 42,
           "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(container_memory_working_set_bytes{namespace=\"batchsender\",pod=~\"worker.*\"}) / 1024 / 1024", "instant": true, "refId": "A" }],
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(container_memory_working_set_bytes{namespace=\"batchsender\",container=\"worker\"}) / 1024 / 1024", "instant": true, "refId": "A" }],
           "title": "Worker Memory (MB)",
           "type": "stat"
         },
@@ -466,7 +466,7 @@ data:
           "gridPos": { "h": 4, "w": 4, "x": 12, "y": 27 },
           "id": 43,
           "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(rate(http_requests_total{namespace=\"batchsender\"}[5m])) or vector(0)", "instant": true, "refId": "A" }],
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(rate(http_requests_total{job=\"batchsender-worker\"}[5m])) or vector(0)", "instant": true, "refId": "A" }],
           "title": "HTTP Rate",
           "type": "stat"
         },
@@ -558,8 +558,8 @@ data:
           "id": 61,
           "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
           "targets": [
-            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "100 * sum(rate(container_cpu_usage_seconds_total{namespace=\"batchsender\",pod=~\"worker.*\"}[5m])) / sum(kube_pod_container_resource_requests{namespace=\"batchsender\",pod=~\"worker.*\",resource=\"cpu\"})", "legendFormat": "CPU %", "refId": "A" },
-            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "100 * sum(container_memory_working_set_bytes{namespace=\"batchsender\",pod=~\"worker.*\"}) / sum(kube_pod_container_resource_requests{namespace=\"batchsender\",pod=~\"worker.*\",resource=\"memory\"})", "legendFormat": "Memory %", "refId": "B" }
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "100 * sum(rate(container_cpu_usage_seconds_total{namespace=\"batchsender\",container=\"worker\"}[5m])) / sum(kube_pod_container_resource_requests{namespace=\"batchsender\",container=\"worker\",resource=\"cpu\"})", "legendFormat": "CPU %", "refId": "A" },
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "100 * sum(container_memory_working_set_bytes{namespace=\"batchsender\",container=\"worker\"}) / sum(kube_pod_container_resource_requests{namespace=\"batchsender\",container=\"worker\",resource=\"memory\"})", "legendFormat": "Memory %", "refId": "B" }
           ],
           "title": "Worker Resource Usage",
           "type": "timeseries"
