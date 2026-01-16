@@ -81,7 +81,6 @@ jobs:
           kubectl rollout restart deployment/worker -n batchsender
 
       - name: Deploy monitoring stack
-        continue-on-error: true
         run: |
           echo "Deploying monitoring (Prometheus, Grafana, kube-state-metrics)..."
           kubectl apply -f k8s/monitoring/
