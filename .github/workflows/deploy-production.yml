@@ -104,6 +104,11 @@ jobs:
           sleep 5
           kubectl get pods -n batchsender -l app=prometheus
 
+          echo ""
+          echo "=== Restarting Grafana to pick up new datasources ==="
+          kubectl rollout restart deployment/grafana -n batchsender || echo "Could not restart grafana"
+          kubectl rollout status deployment/grafana -n batchsender --timeout=2m || echo "Grafana rollout status check failed"
+
       - name: Wait for rollout to complete
         run: |
           kubectl rollout status deployment/worker -n batchsender --timeout=5m
