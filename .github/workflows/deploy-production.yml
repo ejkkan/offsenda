@@ -83,7 +83,7 @@ jobs:
       - name: Deploy monitoring stack
         run: |
           echo "Deploying monitoring (Prometheus, Grafana, kube-state-metrics)..."
-          kubectl apply --server-side=true -f k8s/monitoring/
+          kubectl apply --server-side=true --force-conflicts -f k8s/monitoring/
 
           echo ""
           echo "=== Checking kube-state-metrics ==="
