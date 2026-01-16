@@ -83,8 +83,25 @@ jobs:
       - name: Deploy monitoring stack
         continue-on-error: true
         run: |
-          echo "Deploying monitoring (Prometheus, Grafana)..."
-          kubectl apply -f k8s/monitoring/ || echo "Warning: Some monitoring resources failed to apply"
+          echo "Deploying monitoring (Prometheus, Grafana, kube-state-metrics)..."
+          kubectl apply -f k8s/monitoring/
+
+          echo ""
+          echo "=== Checking kube-state-metrics ==="
+          kubectl get deployment kube-state-metrics -n batchsender || echo "kube-state-metrics deployment not found"
+          kubectl get pods -n batchsender -l app=kube-state-metrics
+
+          echo ""
+          echo "=== Restarting kube-state-metrics to ensure latest config ==="
+          kubectl rollout restart deployment/kube-state-metrics -n batchsender || echo "Could not restart kube-state-metrics"
+
+          echo ""
+          echo "=== Checking Prometheus ==="
+          kubectl get pods -n batchsender -l app=prometheus
+
+          echo ""
+          echo "=== Reloading Prometheus config ==="
+          kubectl rollout restart deployment/prometheus -n batchsender || echo "Could not restart prometheus"
 
       - name: Wait for rollout to complete
         run: |
