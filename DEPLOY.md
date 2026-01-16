@@ -10,7 +10,7 @@
 ## 📊 Current Deployment Status
 
 ### ✅ What's Running
-- **Cluster**: 1 master + 2 worker nodes (waiting for IP limit increase for 3-master HA)
+- **Cluster**: 1 master + 2 worker nodes (development/testing configuration)
 - **PostgreSQL**: External (Neon Database) - connection working
 - **DragonflyDB**: Running (Redis-compatible, distributed rate limiting)
 - **NATS JetStream**: Running (message queue, single-node mode)
@@ -18,6 +18,84 @@
 - **Worker Pods**: 2 replicas, fully operational
 - **KEDA Autoscaling**: Active (scales 2-50 workers based on NATS queue depth)
 - **GitOps**: ✅ Push to main → auto-deploy via GitHub Actions
+
+### 🏗️ Cluster Architecture: Development vs Production
+
+#### Current Setup: 1-Master (Development/Testing)
+**Configuration:**
+- 1 master node (cpx22, €6.99/mo)
+- 2+ worker nodes with autoscaling (cpx22, €6.99/mo each)
+- Single datacenter (fsn1)
+
+**Why we're using this now:**
+- ✅ **Cost-effective**: €14/mo vs €28/mo (50% savings)
+- ✅ **Hetzner IP limits**: New accounts limited to 3 Primary IPs
+- ✅ **Development phase**: Don't need HA during development
+- ✅ **Identical workflow**: GitOps, KEDA, monitoring all work the same
+- ✅ **Quick iteration**: Faster to tear down and recreate
+
+**Limitations:**
+- ⚠️ **Single point of failure**: If master goes down, cluster is unavailable
+- ⚠️ **No datacenter redundancy**: All nodes in one location
+- ⚠️ **Recovery time**: Need to recreate cluster if master fails (~15 minutes)
+
+**Good for:**
+- Development and testing
+- Low-traffic production (100-1000 users)
+- Non-critical applications
+- MVP/Beta phase
+- Budget-conscious deployments
+
+---
+
+#### Production Setup: 3-Master HA (Recommended for Production)
+**Configuration:**
+- 3 master nodes (cpx22, €6.99/mo each = €20.97/mo)
+- 2+ worker nodes with autoscaling (cpx22, €6.99/mo each)
+- Spread across 3 datacenters (fsn1, nbg1, hel1)
+
+**Why this is the production standard:**
+- ✅ **High Availability**: Survives 1 master failure (quorum = 2/3)
+- ✅ **Datacenter redundancy**: Survives entire datacenter outage
+- ✅ **Zero-downtime updates**: Can update masters one at a time
+- ✅ **Industry standard**: K8s best practice for production
+
+**How HA works:**
+- Kubernetes uses etcd with raft consensus (needs quorum: N/2 + 1)
+- 3 masters = can lose 1 and still have quorum (2/3)
+- 2 masters = **NOT HA** (lose 1 = lose quorum)
+- Masters distributed across datacenters = survives datacenter failure
+
+**Good for:**
+- Production with real users
+- Applications with SLA requirements
+- Mission-critical workloads
+- Compliance requirements (uptime guarantees)
+
+**Cost comparison:**
+- 1-master: €14/mo (1 master + 2 workers)
+- 3-master: €28/mo (3 masters + 2 workers)
+- **Difference: €14/mo** for high availability
+
+---
+
+#### When to Upgrade from 1-Master to 3-Master
+
+**Upgrade when you have:**
+1. **Real users** (beyond testing/beta)
+2. **Revenue dependency** (downtime = lost money)
+3. **SLA requirements** (99.9% uptime promises)
+4. **IP limit approval** from Hetzner (3 → 10 IPs)
+5. **Budget for redundancy** (+€14/mo acceptable)
+
+**Don't upgrade if:**
+- Still in development/MVP phase
+- Low traffic (<1000 users)
+- Can tolerate 15-minute downtime for recovery
+- Budget-constrained
+- Testing and iterating frequently
+
+**Current recommendation: Stay on 1-master until you hit real production scale.**
 
 ### 🔑 GitHub Secrets Configured
 Only 2 secrets needed in GitHub (Settings → Secrets → Actions):

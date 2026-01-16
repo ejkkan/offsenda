@@ -26,6 +26,7 @@ hetzner_token: "jX8r0JIRNDYOIRFfAqlbjXJcO4qmnAnjQ2tzKo73MOkFJea1npg4aP7G9X0nzYKm
 # Cluster identification
 cluster_name: batchsender-prod
 kubeconfig_path: "./kubeconfig"
+protect_against_deletion: false
 
 # k3s version (latest stable as of 2025)
 k3s_version: v1.32.0+k3s1
