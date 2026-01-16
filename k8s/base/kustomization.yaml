@@ -30,6 +30,7 @@ resources:
   - clickhouse/cluster-configmap.yaml
   - clickhouse/keeper-configmap.yaml
   - clickhouse/backup-cronjob.yaml
+  - clickhouse/ingress.yaml
   - worker/configmap.yaml
   # Migrated to External Secrets
   - worker/sealed-secrets.yaml
