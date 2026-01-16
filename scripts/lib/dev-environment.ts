@@ -49,6 +49,7 @@ export class DevEnvironment {
   private webProcess?: ChildProcess;
   private workerProcess?: ChildProcess;
   private skaffoldProcess?: ChildProcess;
+  private studioProcess?: ChildProcess;
   private projectRoot: string;
 
   constructor(config: DevConfig) {
@@ -295,6 +296,14 @@ EOF`);
       });
     }
 
+    // Start Drizzle Studio
+    const dbDir = path.join(this.projectRoot, 'packages/db');
+    this.studioProcess = spawn('pnpm', ['db:studio:local'], {
+      cwd: dbDir,
+      stdio: 'pipe',
+      env: process.env,
+    });
+
     // Wait for apps to be ready
     const appHealthChecks = [HEALTH_CHECKS.web];
     if (this.mode !== 'k8s') {
@@ -308,6 +317,7 @@ EOF`);
       }
     }
 
+    console.log(`${colors.green}  ✓${colors.reset} Drizzle Studio started`);
     console.log(`${colors.green}  ✓${colors.reset} Applications started`);
   }
 
@@ -333,6 +343,7 @@ EOF`);
     console.log('  ┌────────────────────┬─────────────────────────────────┐');
     console.log(`  │ ${colors.cyan}🌐 Web App${colors.reset}         │ http://localhost:5001           │`);
     console.log(`  │ ${colors.cyan}⚙️  Worker API${colors.reset}      │ http://localhost:6001           │`);
+    console.log(`  │ ${colors.cyan}🗄️  Drizzle Studio${colors.reset}  │ https://local.drizzle.studio    │`);
     console.log(`  │ ${colors.cyan}📨 NATS Monitor${colors.reset}    │ http://localhost:8222           │`);
     console.log(`  │ ${colors.cyan}📊 ClickHouse${colors.reset}      │ http://localhost:8123           │`);
     console.log('  └────────────────────┴─────────────────────────────────┘');
@@ -404,6 +415,11 @@ EOF`);
     if (this.skaffoldProcess) {
       console.log(`  ${colors.cyan}→${colors.reset} Stopping skaffold...`);
       this.skaffoldProcess.kill('SIGTERM');
+    }
+
+    if (this.studioProcess) {
+      console.log(`  ${colors.cyan}→${colors.reset} Stopping Drizzle Studio...`);
+      this.studioProcess.kill('SIGTERM');
     }
 
     // Stop Docker services

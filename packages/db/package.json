@@ -15,9 +15,9 @@
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
-    "db:push": "drizzle-kit push:pg",
-    "db:push:local": "DATABASE_URL='postgresql://batchsender:batchsender@localhost:5455/batchsender' drizzle-kit push:pg",
-    "db:push:remote": "bash -c 'set -a && source ../../.env.prod && DATABASE_URL=$DATABASE_URL_DIRECT drizzle-kit push:pg'",
+    "db:push": "drizzle-kit push",
+    "db:push:local": "DATABASE_URL='postgresql://batchsender:batchsender@localhost:5455/batchsender' drizzle-kit push",
+    "db:push:remote": "bash -c 'set -a && source ../../.env.prod && DATABASE_URL=$DATABASE_URL_DIRECT drizzle-kit push'",
     "db:migrate": "drizzle-kit migrate",
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
@@ -25,12 +25,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^0.9.0",
+    "@neondatabase/serverless": "^1.0.2",
     "postgres": "^3.4.8"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.20.18",
-    "drizzle-orm": "^0.29.5",
+    "drizzle-kit": "^0.31.8",
+    "drizzle-orm": "^0.45.1",
     "pg": "^8.17.1",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3"

@@ -122,8 +122,19 @@ jobs:
           echo "KEDA scaling:"
           kubectl get scaledobject -n batchsender
 
-      - name: Notify on failure
+      - name: Debug on failure
         if: failure()
         run: |
-          echo "❌ Deployment failed!"
-          echo "Check the logs above for details"
+          echo "❌ Deployment failed! Gathering debug info..."
+          echo ""
+          echo "=== Pod Status ==="
+          kubectl get pods -n batchsender -l app=worker
+          echo ""
+          echo "=== Pod Descriptions ==="
+          kubectl describe pods -n batchsender -l app=worker | tail -50
+          echo ""
+          echo "=== Pod Logs ==="
+          kubectl logs -n batchsender -l app=worker --tail=100 || echo "No logs available"
+          echo ""
+          echo "=== Events ==="
+          kubectl get events -n batchsender --sort-by='.lastTimestamp' | tail -20

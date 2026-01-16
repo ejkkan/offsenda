@@ -43,6 +43,10 @@ WORKDIR /app/apps/web
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Dummy DATABASE_URL for build time (Prisma needs it to generate client)
+# Real DATABASE_URL is provided at runtime
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+
 # Build Next.js
 RUN pnpm build
 
