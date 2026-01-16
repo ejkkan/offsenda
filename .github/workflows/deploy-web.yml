@@ -1,13 +1,11 @@
-name: Deploy Web App
+name: Build and Deploy Web
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
       - 'apps/web/**'
       - 'packages/db/**'
-      - 'k8s/base/web/**'
       - '.github/workflows/deploy-web.yml'
   workflow_dispatch:
 
@@ -68,30 +66,13 @@ jobs:
           echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
 
-      - name: Create GHCR image pull secret
+      - name: Restart web to pull new image
         run: |
-          kubectl create secret docker-registry ghcr-credentials \
-            --namespace=batchsender \
-            --docker-server=ghcr.io \
-            --docker-username=${{ github.actor }} \
-            --docker-password=${{ secrets.GH_TOKEN }} \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Deploy to Kubernetes
-        run: |
-          kubectl apply -k k8s/overlays/production
+          kubectl rollout restart deployment/web -n batchsender
           kubectl rollout status deployment/web -n batchsender --timeout=5m
 
-      - name: Verify deployment
+      - name: Deployment summary
         run: |
-          echo "=== Web Pods ==="
+          echo "✅ Web image built and deployed!"
+          echo "Image: ${{ steps.meta.outputs.tags }}"
           kubectl get pods -n batchsender -l app=web
-          echo ""
-          echo "=== Web Ingress ==="
-          kubectl get ingress -n batchsender web-ingress
-          echo ""
-          echo "=== Web Pod Details ==="
-          kubectl describe pods -n batchsender -l app=web | tail -50
-          echo ""
-          echo "=== Web Pod Logs ==="
-          kubectl logs -n batchsender -l app=web --tail=30 || echo "No logs available"

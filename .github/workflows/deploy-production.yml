@@ -1,14 +1,12 @@
-name: Deploy to Production
-# Trigger rebuild v2
+name: Build and Deploy Worker
 
 on:
   push:
     branches: [main]
     paths:
       - 'apps/worker/**'
-      - 'k8s/**'
       - '.github/workflows/deploy-production.yml'
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
@@ -63,138 +61,13 @@ jobs:
           echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
           echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
 
-      - name: Create GHCR image pull secret
-        run: |
-          kubectl create secret docker-registry ghcr-credentials \
-            --namespace=batchsender \
-            --docker-server=ghcr.io \
-            --docker-username=${{ github.actor }} \
-            --docker-password=${{ secrets.GH_TOKEN }} \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Deploy to Kubernetes
-        run: |
-          kubectl apply -k k8s/overlays/production
-
-      - name: Force worker rollout to pull latest image
+      - name: Restart worker to pull new image
         run: |
           kubectl rollout restart deployment/worker -n batchsender
-
-      - name: Deploy monitoring stack
-        run: |
-          echo "Deploying monitoring (Prometheus, Grafana, kube-state-metrics)..."
-          kubectl apply --server-side=true --force-conflicts -f k8s/monitoring/
-
-          echo ""
-          echo "=== Checking kube-state-metrics ==="
-          kubectl get deployment kube-state-metrics -n batchsender || echo "kube-state-metrics deployment not found"
-          kubectl get pods -n batchsender -l app=kube-state-metrics
-
-          echo ""
-          echo "=== Restarting kube-state-metrics to ensure latest config ==="
-          kubectl rollout restart deployment/kube-state-metrics -n batchsender || echo "Could not restart kube-state-metrics"
-
-          echo ""
-          echo "=== Checking Prometheus ==="
-          kubectl get pods -n batchsender -l app=prometheus
-
-          echo ""
-          echo "=== Force fresh Prometheus pod to pick up new ConfigMap ==="
-          kubectl delete pod -n batchsender -l app=prometheus --force --grace-period=0 || echo "Could not delete prometheus pod"
-          sleep 5
-          kubectl get pods -n batchsender -l app=prometheus
-
-          echo ""
-          echo "=== Restarting Grafana to pick up new datasources ==="
-          kubectl rollout restart deployment/grafana -n batchsender || echo "Could not restart grafana"
-          kubectl rollout status deployment/grafana -n batchsender --timeout=2m || echo "Grafana rollout status check failed"
-
-      - name: Wait for rollout to complete
-        run: |
           kubectl rollout status deployment/worker -n batchsender --timeout=5m
 
-      - name: Verify deployment
-        run: |
-          echo "Verifying worker deployment..."
-
-          # Check deployment status (not individual pods - old pods may still be terminating)
-          READY_REPLICAS=$(kubectl get deployment worker -n batchsender -o jsonpath='{.status.readyReplicas}')
-          DESIRED_REPLICAS=$(kubectl get deployment worker -n batchsender -o jsonpath='{.status.replicas}')
-
-          if [ -z "$READY_REPLICAS" ] || [ "$READY_REPLICAS" -lt 1 ]; then
-            echo "❌ No ready worker replicas"
-            exit 1
-          fi
-
-          echo "✅ $READY_REPLICAS/$DESIRED_REPLICAS worker(s) ready"
-
-          # Clean up old stuck pods from previous failed deployments
-          kubectl delete pods -n batchsender -l app=worker --field-selector=status.phase=Pending --ignore-not-found=true || true
-
-      - name: Check KEDA autoscaling
-        run: |
-          echo "Verifying KEDA autoscaling..."
-          kubectl get scaledobject worker-scaler -n batchsender
-
-          # Check KEDA is ready
-          SCALED_OBJECT=$(kubectl get scaledobject worker-scaler -n batchsender -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
-          if [ "$SCALED_OBJECT" = "True" ]; then
-            echo "✅ KEDA autoscaling is active"
-          else
-            echo "⚠️  KEDA autoscaling not ready (may take a few minutes)"
-          fi
-
-      - name: Health check
-        run: |
-          echo "Running health checks..."
-          WORKER_POD=$(kubectl get pods -l app=worker -n batchsender -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-
-          if [ -n "$WORKER_POD" ]; then
-            echo "Testing health endpoint on $WORKER_POD..."
-            kubectl exec -n batchsender $WORKER_POD -- curl -sf http://localhost:6001/health || echo "⚠️  Health check failed (pod may still be starting)"
-
-            echo "Testing metrics endpoint..."
-            kubectl exec -n batchsender $WORKER_POD -- curl -sf http://localhost:6001/api/metrics | head -5 || echo "⚠️  Metrics check failed (pod may still be starting)"
-          fi
-
       - name: Deployment summary
-        if: success()
         run: |
-          echo "✅ Deployment successful!"
-          echo ""
-          echo "Deployed image: ${{ steps.meta.outputs.tags }}"
-          echo ""
-          echo "Pod status:"
-          kubectl get pods -n batchsender
-          echo ""
-          echo "KEDA scaling:"
-          kubectl get scaledobject -n batchsender
-
-      - name: Debug on failure
-        if: failure()
-        run: |
-          echo "❌ Deployment failed! Gathering debug info..."
-          echo ""
-          echo "=== All Pods Status ==="
-          kubectl get pods -n batchsender
-          echo ""
-          echo "=== Worker Pod Descriptions ==="
-          kubectl describe pods -n batchsender -l app=worker | tail -30
-          echo ""
-          echo "=== Worker Logs ==="
-          kubectl logs -n batchsender -l app=worker --tail=50 || echo "No worker logs"
-          echo ""
-          echo "=== Prometheus Pod Status ==="
-          kubectl describe pods -n batchsender -l app=prometheus | tail -40 || echo "No prometheus pod"
-          echo ""
-          echo "=== Prometheus Logs ==="
-          kubectl logs -n batchsender -l app=prometheus --tail=50 || echo "No prometheus logs"
-          echo ""
-          echo "=== Grafana Pod Status ==="
-          kubectl describe pods -n batchsender -l app=grafana | tail -30 || echo "No grafana pod"
-          echo ""
-          echo "=== PVC Status ==="
-          kubectl get pvc -n batchsender
-          echo ""
-          echo "=== Events ==="
-          kubectl get events -n batchsender --sort-by='.lastTimestamp' | tail -30
+          echo "✅ Worker image built and deployed!"
+          echo "Image: ${{ steps.meta.outputs.tags }}"
+          kubectl get pods -n batchsender -l app=worker
