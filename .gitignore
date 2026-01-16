@@ -52,3 +52,10 @@ cluster-config.yaml  # Contains Hetzner API token
 
 # Misc
 *.tsbuildinfo
+
+# Sensitive files - never commit
+k8s/argocd/repo-secret.yaml
+*.env
+*.env.*
+!*.env.example
+sealed-secrets-cert.pem
