@@ -11,7 +11,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/batchsender-web
+  IMAGE_NAME: ${{ github.repository_owner }}/offsenda-web
 
 jobs:
   build-and-deploy:
@@ -65,6 +65,15 @@ jobs:
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
+
+      - name: Create GHCR image pull secret
+        run: |
+          kubectl create secret docker-registry ghcr-credentials \
+            --namespace=batchsender \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GH_TOKEN }} \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy to Kubernetes
         run: |
