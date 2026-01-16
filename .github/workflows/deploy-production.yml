@@ -100,8 +100,10 @@ jobs:
           kubectl get pods -n batchsender -l app=prometheus
 
           echo ""
-          echo "=== Reloading Prometheus config ==="
-          kubectl rollout restart deployment/prometheus -n batchsender || echo "Could not restart prometheus"
+          echo "=== Force fresh Prometheus pod to pick up new ConfigMap ==="
+          kubectl delete pod -n batchsender -l app=prometheus --force --grace-period=0 || echo "Could not delete prometheus pod"
+          sleep 5
+          kubectl get pods -n batchsender -l app=prometheus
 
       - name: Wait for rollout to complete
         run: |
