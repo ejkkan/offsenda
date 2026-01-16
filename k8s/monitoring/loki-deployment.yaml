@@ -48,7 +48,7 @@ data:
       aws:
         # Backblaze B2 S3-compatible endpoint
         # Format: s3.{region}.backblazeb2.com
-        endpoint: s3.us-west-004.backblazeb2.com
+        endpoint: s3.eu-central-003.backblazeb2.com
         bucketnames: batchsender-loki-logs
         access_key_id: ${B2_ACCESS_KEY_ID}
         secret_access_key: ${B2_SECRET_ACCESS_KEY}
