@@ -5,6 +5,7 @@ namespace: batchsender
 
 resources:
   - namespace.yaml
+  - cert-issuer.yaml
   # PostgreSQL - For batch metadata storage
   - postgres/statefulset.yaml
   - postgres/service.yaml
@@ -30,6 +31,7 @@ resources:
   - worker/sealed-secrets.yaml
   - worker/deployment.yaml
   - worker/service.yaml
+  - worker/ingress.yaml
   # KEDA ScaledObject for instant autoscaling (replaces HPA)
   - worker/keda-scaledobject.yaml
   # worker/hpa.yaml - DISABLED: conflicts with KEDA (only use one or the other)
