@@ -69,9 +69,10 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   // Auth middleware
   app.addHook("preHandler", async (request, reply) => {
     // Skip auth for health check, metrics, and webhooks
+    // Use startsWith to handle query strings and be more robust
     if (
       request.url === "/health" ||
-      request.url === "/api/metrics" ||
+      request.url.startsWith("/api/metrics") ||
       request.url.startsWith("/webhooks")
     ) {
       return;

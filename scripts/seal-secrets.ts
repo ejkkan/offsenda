@@ -196,8 +196,9 @@ async function sealSecret(
   outputPath: string
 ): Promise<void> {
   // Build kubectl command
+  // Escape both " and $ to prevent shell expansion (htpasswd contains $apr1$...)
   const literalArgs = Object.entries(literals)
-    .map(([key, value]) => `--from-literal=${key}="${value.replace(/"/g, '\\"')}"`)
+    .map(([key, value]) => `--from-literal=${key}="${value.replace(/\$/g, '\\$').replace(/"/g, '\\"')}"`)
     .join(' ');
 
   const command = `kubectl create secret generic ${name} ${literalArgs} --namespace=${namespace} --dry-run=client -o yaml | kubeseal --cert=sealed-secrets-cert.pem -o yaml > ${outputPath}`;
