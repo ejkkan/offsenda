@@ -35,3 +35,9 @@ resources:
   # KEDA ScaledObject for instant autoscaling (replaces HPA)
   - worker/keda-scaledobject.yaml
   # worker/hpa.yaml - DISABLED: conflicts with KEDA (only use one or the other)
+  # Web App - Next.js frontend
+  - web/configmap.yaml
+  - web/sealed-secrets.yaml
+  - web/deployment.yaml
+  - web/service.yaml
+  - web/ingress.yaml

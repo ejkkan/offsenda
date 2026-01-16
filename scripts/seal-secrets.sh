@@ -90,6 +90,7 @@ check_var "CLICKHOUSE_DATABASE"
 check_var "B2_KEY_ID"
 check_var "B2_APP_KEY"
 check_var "B2_BUCKET"
+check_var "NEXTAUTH_SECRET"
 
 if [ $MISSING_VARS -gt 0 ]; then
   echo ""
@@ -103,6 +104,7 @@ echo ""
 # Create k8s/base directories if they don't exist
 mkdir -p k8s/base/worker
 mkdir -p k8s/base/clickhouse
+mkdir -p k8s/base/web
 
 # Encrypt worker secrets
 echo -e "${CYAN}→${NC} Encrypting worker secrets..."
@@ -141,6 +143,17 @@ kubectl create secret generic clickhouse-b2-secret \
 
 echo -e "${GREEN}✓${NC} Created: k8s/base/clickhouse/sealed-b2-secret.yaml"
 
+# Encrypt Web App secrets
+echo -e "${CYAN}→${NC} Encrypting Web App secrets..."
+kubectl create secret generic web-secrets \
+  --from-literal=DATABASE_URL="$DATABASE_URL" \
+  --from-literal=NEXTAUTH_SECRET="$NEXTAUTH_SECRET" \
+  --namespace=batchsender \
+  --dry-run=client -o yaml | \
+  kubeseal --cert=sealed-secrets-cert.pem -o yaml > k8s/base/web/sealed-secrets.yaml
+
+echo -e "${GREEN}✓${NC} Created: k8s/base/web/sealed-secrets.yaml"
+
 # Summary
 echo ""
 echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -151,6 +164,7 @@ echo -e "${BOLD}Generated files:${NC}"
 echo -e "  • k8s/base/worker/sealed-secrets.yaml"
 echo -e "  • k8s/base/clickhouse/sealed-secrets.yaml"
 echo -e "  • k8s/base/clickhouse/sealed-b2-secret.yaml"
+echo -e "  • k8s/base/web/sealed-secrets.yaml"
 echo ""
 echo -e "${BOLD}${CYAN}Next steps:${NC}"
 echo -e "  1. Review the generated files (they're encrypted and safe to commit)"
