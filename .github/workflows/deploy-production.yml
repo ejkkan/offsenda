@@ -76,6 +76,10 @@ jobs:
         run: |
           kubectl apply -k k8s/overlays/production
 
+      - name: Force worker rollout to pull latest image
+        run: |
+          kubectl rollout restart deployment/worker -n batchsender
+
       - name: Deploy monitoring stack
         continue-on-error: true
         run: |
