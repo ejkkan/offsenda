@@ -63,6 +63,15 @@ jobs:
           echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
           echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
 
+      - name: Create GHCR image pull secret
+        run: |
+          kubectl create secret docker-registry ghcr-credentials \
+            --namespace=batchsender \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GH_TOKEN }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Deploy to Kubernetes
         run: |
           kubectl apply -k k8s/overlays/production

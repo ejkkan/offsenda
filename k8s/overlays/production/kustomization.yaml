@@ -79,7 +79,3 @@ patches:
   target:
     kind: StatefulSet
     name: nats
-images:
-- name: worker
-  newName: ghcr.io/ejkkan/offsenda/worker
-  newTag: d7ca20f156091245a2545e7debe579e24e88683c
