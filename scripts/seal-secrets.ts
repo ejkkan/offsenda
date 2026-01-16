@@ -292,7 +292,7 @@ async function sealSecrets(secrets: EnvSecrets): Promise<void> {
     'prometheus-basic-auth',
     'batchsender',
     {
-      auth: prometheusAuth,
+      users: prometheusAuth,  // Traefik BasicAuth expects 'users' key, not 'auth'
     },
     'k8s/monitoring/sealed-prometheus-auth.yaml'
   );
