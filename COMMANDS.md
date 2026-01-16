@@ -122,6 +122,36 @@ pnpm test:all              # Run unit + integration + E2E tests
 
 **Total time:** ~5-10 minutes for full suite
 
+### Load Tests
+
+```bash
+pnpm test:load             # Run load test (default: 5 batches × 5k recipients)
+pnpm test:load:small       # Small load test (2 batches × 1k recipients)
+pnpm test:load:large       # Large load test (10 batches × 10k recipients)
+pnpm test:load:stress      # Stress test (20 batches × 20k recipients)
+```
+
+**What it does:**
+- Creates multiple test batches with synthetic recipients
+- Queues all batches for sending
+- Monitors KEDA autoscaling behavior in real-time
+- Shows HPA status, worker pod count, and queue depth every 10 seconds
+
+**Requirements:**
+- `API_KEY` environment variable set
+- kubectl access to cluster
+- Running BatchSender deployment
+
+**Example:**
+```bash
+API_KEY=your-key pnpm test:load:large
+```
+
+**Custom load test:**
+```bash
+API_KEY=your-key pnpm test:load --batches=15 --recipients=8000
+```
+
 ---
 
 ## 🏗️ Building
@@ -143,6 +173,10 @@ pnpm db:push:remote        # Push to remote database
 pnpm db:migrate            # Run migrations
 pnpm db:studio             # Open Drizzle Studio
 pnpm db:studio:local       # Open studio for local DB
+pnpm db:backup             # Backup ClickHouse to B2
+pnpm db:backup:full        # Full backup
+pnpm db:backup:incremental # Incremental backup
+pnpm db:restore            # Restore from backup
 ```
 
 **Drizzle Studio:** Visual database browser at http://localhost:4983
@@ -168,18 +202,38 @@ pnpm deploy:check          # Validate deployment readiness
 
 **Use before:** Pushing to main or creating PRs
 
+### Secret Management
+
+```bash
+pnpm secrets:seal          # Encrypt production secrets
+```
+
+**What it does:**
+- Reads `.env.prod`
+- Validates all required variables
+- Encrypts secrets with kubeseal
+- Generates sealed-secrets YAML files (safe to commit)
+
 ### Deployment Status
 
 ```bash
 pnpm deploy:status         # Check production deployment status
+pnpm deploy:verify         # Run comprehensive health checks
 ```
 
-**Shows:**
+**Status shows:**
 - Pod status and health
 - Deployment readiness
 - Service endpoints
 - Ingress configuration
 - Recent events
+
+**Verify checks:**
+- Namespace exists
+- PostgreSQL, DragonflyDB, NATS, ClickHouse ready
+- Worker deployment available
+- KEDA autoscaling configured
+- Health and metrics endpoints responding
 
 ---
 
@@ -216,6 +270,56 @@ pnpm k8s:events            # View recent events
 pnpm k8s:restart           # Restart worker deployment
 pnpm k8s:cleanup           # Delete local k3d cluster
 ```
+
+---
+
+## ☁️ Cluster Management
+
+### Bootstrap Infrastructure
+
+```bash
+pnpm cluster:bootstrap     # Install infrastructure components
+```
+
+**What it does:**
+1. Checks prerequisites (kubeconfig, kubectl, helm, kubeseal)
+2. Installs Metrics Server (CPU/memory metrics)
+3. Installs KEDA (worker autoscaling)
+4. Installs Sealed Secrets (secret encryption)
+5. Fetches and saves sealed-secrets certificate
+6. Installs Prometheus + Grafana (monitoring)
+7. Installs cert-manager (SSL certificates)
+
+**When to use:**
+- Once during initial cluster setup
+- After creating a new production cluster
+
+**Prerequisites:**
+- `./kubeconfig` file exists
+- kubectl, helm, kubeseal installed
+
+**Time:** 10-15 minutes
+
+### Destroy Cluster
+
+```bash
+pnpm cluster:destroy       # Destroy Hetzner k3s cluster
+```
+
+**⚠️ DANGER:** This permanently deletes:
+- All nodes (masters + workers)
+- All load balancers
+- All volumes
+- All data (databases, ClickHouse, etc.)
+
+**Safety:**
+- Requires typing "destroy" to confirm
+- Shows cluster info before destruction
+- Optionally cleans up local files (kubeconfig, sealed-secrets-cert.pem)
+
+**Prerequisites:**
+- `cluster-config.yaml` exists
+- hetzner-k3s CLI installed
 
 ---
 
@@ -269,7 +373,7 @@ pnpm services:stop         # Clean shutdown
 pnpm deploy:check          # Pre-flight checks
 
 # 2. Seal secrets
-./scripts/seal-secrets.sh  # Encrypt production secrets
+pnpm secrets:seal          # Encrypt production secrets
 
 # 3. Commit and push
 git add .
@@ -278,6 +382,7 @@ git push origin main       # Auto-deploys via GitHub Actions
 
 # 4. Monitor deployment
 pnpm deploy:status         # Check deployment status
+pnpm deploy:verify         # Run comprehensive health checks
 pnpm prod:logs             # Watch logs
 ```
 
@@ -339,19 +444,14 @@ pnpm prod:shell
 
 ---
 
-## 🔄 Migration Guide
+## 👤 User Management
 
-### Old Commands → New Commands
+```bash
+pnpm user:create           # Create a new user
+pnpm user:api-key          # Generate API key for a user
+```
 
-| Old | New | Notes |
-|-----|-----|-------|
-| `./dev.sh` | `pnpm dev` | Auto-detects mode |
-| `./dev-k8s.sh` | `pnpm dev --mode=k8s` | Force K8s mode |
-| `./check-ports.sh` | `pnpm services` | Shows more info |
-| `./stop-dev.sh` | `pnpm services:stop` | Stops everything |
-| `./start-monitoring.sh` | `pnpm monitoring:start` | TypeScript version |
-
-**Old commands still work** with deprecation warnings for backwards compatibility.
+**Use for:** Creating users and managing API access to the system
 
 ---
 

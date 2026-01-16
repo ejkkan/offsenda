@@ -1,0 +1,13 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: prometheus-basic-auth
+  namespace: batchsender
+spec:
+  encryptedData:
+    auth: AgDI+ulmkjpOzpHhWC6315SZDdoNc5BDBm65cEGfYLZUrl1gCQN9I9qwvzXj/cAB/BZj3aHGn6g8CDaJd8xqrxL39ol+DiuD3kT7RrQE9h6nglF8BBh27f0lkd/uMOj5wo+/ReZcgFTL1+8EOxzJrKcT2omWVOqyK9HAOXTIkoOuOixsHG97tw8Cn9tsKFgJxUM7hExAd0G0wg1FIuRw0QxyTZyO6FKDw8Eb4Ax7Co7FJev/mN+4B0AAYU1x3deHf6LxirhQdHe6h5pJKuU86YHXMHoH2eu9NYD6YIWvZF06W+q47PxnmeArG+o8Fwn56mUX+yXrZ5QzsLRFDA8Z2sEjlZ6hZ/Re6TqpRfvZHYAqAhRNEYN9vvm2bX6s12zxny+L8GANm2R5hz2GIVRRn8Of7abVgy4ZCYbFWi+4MWz/rbAV3feWFrEJ0UM1iqZxdy7ST5AVIUUxVIXGXgG3GgQ3is7xLgtJ5Uc4/6d7Gsy0z89qAnl/obJA8VtITCs06syKLIfIDqRgLkt6GQXunD0Y+ir9nqzBSQfw1YbFKzHhVoCs3hmxri1f07X1nsuCNmTtOvNGcQvuTaFdyYyk87niYL1bUZYJu6J/VGIEwgt6hVYyYdBZ3FoAJPyu/LEDANDYGZmEWfmKVXVh9+t0893DLhOtMD87Fbs3MWZ8yJG9bKi2jVNK3aF9WvTGbyzEpnrFvKKtJRRr+pJMam/NkLZ3HDk=
+  template:
+    metadata:
+      name: prometheus-basic-auth
+      namespace: batchsender

@@ -11,6 +11,13 @@ import { getModule } from "../modules/index.js";
 import type { JobPayload, JobResult } from "../modules/types.js";
 import { log, createTimer } from "../logger.js";
 import { ProviderRateLimiter } from "../provider-rate-limiter.js";
+import {
+  emailsSentTotal,
+  emailErrorsTotal,
+  emailSendDuration,
+  batchesProcessedTotal,
+  clickhouseEventsTotal,
+} from "../metrics.js";
 
 // Provider rate limiters keyed by config ID
 // Lazily created when first needed for a specific config
@@ -316,6 +323,9 @@ export class NatsEmailWorker {
 
     await logEmailEvents(queuedEvents);
 
+    // Record queued events metric
+    clickhouseEventsTotal.inc({ event_type: "queued" }, queuedEvents.length);
+
     // Create jobs with embedded send config
     const jobs: JobData[] = pendingRecipients.map((r: { id: string; email: string | null; identifier: string | null; name: string | null; variables: Record<string, string> | null }) => ({
       batchId,
@@ -440,6 +450,9 @@ export class NatsEmailWorker {
       }
     }
 
+    // Start timing the send operation
+    const sendTimer = emailSendDuration.startTimer({ provider: sendConfig.module, status: "success" });
+
     // Execute via module system
     // Build a SendConfig-like object for the module
     const configForModule = {
@@ -505,6 +518,11 @@ export class NatsEmailWorker {
       });
     }
 
+    // Record metrics
+    sendTimer(); // Record send duration
+    emailsSentTotal.inc({ provider: sendConfig.module, status: "sent" });
+    clickhouseEventsTotal.inc({ event_type: "sent" });
+
     log.email.debug({ batchId, to: recipientIdentifier, module: sendConfig.module }, "sent");
 
     // Check if batch is complete
@@ -565,6 +583,10 @@ export class NatsEmailWorker {
         error_message: error.message,
       });
 
+      // Record error metrics
+      emailErrorsTotal.inc({ provider: sendConfig.module, error_type: "permanent" });
+      clickhouseEventsTotal.inc({ event_type: "failed" });
+
       log.email.error(
         { batchId, recipientId, identifier: recipientIdentifier, module: sendConfig.module, error: error.message },
         "permanently failed"
@@ -619,6 +641,9 @@ export class NatsEmailWorker {
               updatedAt: new Date(),
             })
             .where(eq(batches.id, batchId));
+
+          // Record batch completion metric
+          batchesProcessedTotal.inc({ status: "completed" });
 
           log.batch.info({ id: batchId }, "completed");
         }

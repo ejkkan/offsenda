@@ -10,7 +10,6 @@ data:
 
     [security]
     admin_user = admin
-    admin_password = ${GF_SECURITY_ADMIN_PASSWORD}
 
     [auth]
     disable_login_form = false
@@ -18,15 +17,267 @@ data:
     [users]
     allow_sign_up = false
 
+    [dashboards]
+    default_home_dashboard_path = /var/lib/grafana/dashboards/batchsender.json
+
 ---
 apiVersion: v1
-kind: Secret
+kind: ConfigMap
 metadata:
-  name: grafana-secret
+  name: grafana-datasources
   namespace: batchsender
-type: Opaque
-stringData:
-  admin-password: "your-secure-password-here"  # Change this!
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: PBFA97CFB590B2093
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+        editable: false
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-providers
+  namespace: batchsender
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'default'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: batchsender
+data:
+  batchsender.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+          "id": 1,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(emails_sent_total) or vector(0)", "instant": true, "refId": "A" }],
+          "title": "Total Emails Sent",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+          "id": 2,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(batches_processed_total) or vector(0)", "instant": true, "refId": "A" }],
+          "title": "Total Batches",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+          "id": 3,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "count(kube_pod_info{namespace=\"batchsender\",pod=~\"worker.*\"})", "instant": true, "refId": "A" }],
+          "title": "Worker Pods",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }] },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+          "id": 4,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "count(kube_node_info)", "instant": true, "refId": "A" }],
+          "title": "Cluster Nodes",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 100 }, { "color": "red", "value": 1000 }] },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+          "id": 5,
+          "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "nats_queue_depth_total", "refId": "A" }],
+          "title": "Queue Depth",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 }] },
+              "unit": "s"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+          "id": 6,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "histogram_quantile(0.95, sum(rate(email_send_duration_seconds_bucket[5m])) by (le)) or vector(0)", "instant": true, "refId": "A" }],
+          "title": "Email Latency (p95)",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2 }, "unit": "short" } },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "id": 10,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(increase(emails_sent_total[1m]))", "legendFormat": "Emails Sent", "refId": "A" }],
+          "title": "Emails Sent (per minute)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }, "unit": "s" } },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "id": 11,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "histogram_quantile(0.50, sum(rate(email_send_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "histogram_quantile(0.95, sum(rate(email_send_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95", "refId": "B" },
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "histogram_quantile(0.99, sum(rate(email_send_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p99", "refId": "C" }
+          ],
+          "title": "Email Send Latency",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 12 },
+          "id": 100,
+          "panels": [],
+          "title": "Kubernetes Cluster",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2 }, "unit": "short" } },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+          "id": 20,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "count(kube_pod_info{namespace=\"batchsender\",pod=~\"worker.*\"})", "legendFormat": "Worker Pods", "refId": "A" },
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "kube_horizontalpodautoscaler_spec_max_replicas{namespace=\"batchsender\",horizontalpodautoscaler=\"worker-hpa\"}", "legendFormat": "HPA Max", "refId": "B" },
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "kube_horizontalpodautoscaler_spec_min_replicas{namespace=\"batchsender\",horizontalpodautoscaler=\"worker-hpa\"}", "legendFormat": "HPA Min", "refId": "C" }
+          ],
+          "title": "Worker Pod Scaling",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }, "unit": "percent" } },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+          "id": 21,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "100 * sum(rate(container_cpu_usage_seconds_total{namespace=\"batchsender\",pod=~\"worker.*\"}[5m])) / sum(kube_pod_container_resource_requests{namespace=\"batchsender\",pod=~\"worker.*\",resource=\"cpu\"})", "legendFormat": "CPU %", "refId": "A" },
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "100 * sum(container_memory_working_set_bytes{namespace=\"batchsender\",pod=~\"worker.*\"}) / sum(kube_pod_container_resource_requests{namespace=\"batchsender\",pod=~\"worker.*\",resource=\"memory\"})", "legendFormat": "Memory %", "refId": "B" }
+          ],
+          "title": "Worker Resource Usage",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 },
+          "id": 101,
+          "panels": [],
+          "title": "Queue & Events",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1 }, "unit": "short" } },
+          "gridPos": { "h": 6, "w": 12, "x": 0, "y": 22 },
+          "id": 30,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "nats_queue_depth_batch_processor", "legendFormat": "Batch Processor", "refId": "A" },
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "nats_queue_depth_email_processor", "legendFormat": "Email Processor", "refId": "B" }
+          ],
+          "title": "Queue Depth",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "stacking": { "mode": "normal" } }, "unit": "short" } },
+          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 22 },
+          "id": 31,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(increase(clickhouse_events_total[1m])) by (event_type)", "legendFormat": "{{event_type}}", "refId": "A" }],
+          "title": "Events by Type",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "tags": ["batchsender", "production"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "timepicker": {},
+      "timezone": "",
+      "title": "BatchSender Production",
+      "uid": "batchsender-prod",
+      "version": 1
+    }
+
+---
+# Note: grafana-secret is created by sealed secret (k8s/monitoring/sealed-grafana-secret.yaml)
+# Run: pnpm seal-secrets to generate it from .env.prod
 
 ---
 apiVersion: apps/v1
@@ -44,9 +295,12 @@ spec:
       labels:
         app: grafana
     spec:
+      securityContext:
+        fsGroup: 472
+        runAsUser: 472
       containers:
       - name: grafana
-        image: grafana/grafana:latest
+        image: grafana/grafana:10.2.3
         ports:
         - containerPort: 3000
         env:
@@ -55,26 +309,67 @@ spec:
             secretKeyRef:
               name: grafana-secret
               key: admin-password
-        - name: GF_INSTALL_PLUGINS
-          value: "grafana-clock-panel,grafana-simple-json-datasource"
         volumeMounts:
         - name: grafana-config
-          mountPath: /etc/grafana
+          mountPath: /etc/grafana/grafana.ini
+          subPath: grafana.ini
+        - name: grafana-datasources
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: grafana-dashboard-providers
+          mountPath: /etc/grafana/provisioning/dashboards
+        - name: grafana-dashboards
+          mountPath: /var/lib/grafana/dashboards
         - name: grafana-storage
           mountPath: /var/lib/grafana
         resources:
           requests:
             memory: "256Mi"
-            cpu: "250m"
+            cpu: "100m"
           limits:
             memory: "512Mi"
             cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 60
+          timeoutSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 5
+          timeoutSeconds: 10
       volumes:
       - name: grafana-config
         configMap:
           name: grafana-config
+      - name: grafana-datasources
+        configMap:
+          name: grafana-datasources
+      - name: grafana-dashboard-providers
+        configMap:
+          name: grafana-dashboard-providers
+      - name: grafana-dashboards
+        configMap:
+          name: grafana-dashboards
       - name: grafana-storage
-        emptyDir: {}  # Consider using PersistentVolume for production
+        persistentVolumeClaim:
+          claimName: grafana-pvc
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-pvc
+  namespace: batchsender
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: hcloud-volumes
 
 ---
 apiVersion: v1
@@ -97,7 +392,6 @@ metadata:
   namespace: batchsender
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    nginx.ingress.kubernetes.io/proxy-body-size: "0"
 spec:
   ingressClassName: nginx
   tls:

@@ -2,6 +2,7 @@
 
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import { parseArgs } from 'node:util';
 
 const execAsync = promisify(exec);
 
@@ -142,22 +143,192 @@ function getRelativeTime(date: Date): string {
   return 'just now';
 }
 
-async function main() {
+/**
+ * Verification mode - comprehensive health checks
+ */
+async function runVerification(): Promise<void> {
   console.log('');
   console.log(`${colors.bold}${colors.cyan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
-  console.log(`${colors.bold}${colors.cyan}  Production Deployment Status${colors.reset}`);
+  console.log(`${colors.bold}${colors.cyan}  Production Deployment Verification${colors.reset}`);
   console.log(`${colors.cyan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
   console.log('');
+
+  let errors = 0;
+
+  // Helper to check and report
+  const check = (passed: boolean, message: string): void => {
+    if (passed) {
+      console.log(`  ${colors.green}✓${colors.reset} ${message}`);
+    } else {
+      console.log(`  ${colors.red}✗${colors.reset} ${message}`);
+      errors++;
+    }
+  };
+
+  // Check namespace
+  console.log(`${colors.cyan}[1/8]${colors.reset} Checking namespace...`);
+  try {
+    await execAsync('kubectl get namespace batchsender');
+    check(true, 'Namespace \'batchsender\' exists');
+  } catch {
+    check(false, 'Namespace \'batchsender\' exists');
+  }
+
+  // Check PostgreSQL
+  console.log(`${colors.cyan}[2/8]${colors.reset} Checking PostgreSQL...`);
+  try {
+    await execAsync('kubectl wait --for=condition=ready pod -l app=postgres -n batchsender --timeout=30s');
+    check(true, 'PostgreSQL pod is ready');
+  } catch {
+    check(false, 'PostgreSQL pod is ready');
+  }
+
+  // Check DragonflyDB
+  console.log(`${colors.cyan}[3/8]${colors.reset} Checking DragonflyDB...`);
+  try {
+    await execAsync('kubectl wait --for=condition=ready pod -l app=dragonfly -n batchsender --timeout=30s');
+    check(true, 'DragonflyDB pod is ready');
+  } catch {
+    check(false, 'DragonflyDB pod is ready');
+  }
+
+  // Check NATS
+  console.log(`${colors.cyan}[4/8]${colors.reset} Checking NATS cluster...`);
+  try {
+    const { stdout } = await execAsync('kubectl get pods -l app=nats -n batchsender -o jsonpath=\'{.items[*].status.conditions[?(@.type=="Ready")].status}\'');
+    const readyCount = (stdout.match(/True/g) || []).length;
+    check(readyCount >= 1, `NATS pods ready (${readyCount}/3 replicas)`);
+  } catch {
+    check(false, 'NATS pods not ready');
+  }
+
+  // Check ClickHouse
+  console.log(`${colors.cyan}[5/8]${colors.reset} Checking ClickHouse...`);
+  try {
+    await execAsync('kubectl wait --for=condition=ready pod -l app=clickhouse -n batchsender --timeout=60s');
+    check(true, 'ClickHouse pod is ready');
+  } catch {
+    check(false, 'ClickHouse pod is ready');
+  }
+
+  // Check Worker deployment
+  console.log(`${colors.cyan}[6/8]${colors.reset} Checking Worker deployment...`);
+  try {
+    await execAsync('kubectl wait --for=condition=available deployment/worker -n batchsender --timeout=60s');
+    check(true, 'Worker deployment is available');
+
+    const { stdout } = await execAsync('kubectl get deployment worker -n batchsender -o jsonpath=\'{.status.readyReplicas}\'');
+    const replicas = parseInt(stdout);
+    check(replicas >= 1, `Worker replicas ready (${replicas})`);
+  } catch {
+    check(false, 'Worker deployment is available');
+  }
+
+  // Check KEDA ScaledObject
+  console.log(`${colors.cyan}[7/8]${colors.reset} Checking KEDA autoscaling...`);
+  try {
+    const { stdout } = await execAsync('kubectl get scaledobject worker-scaler -n batchsender -o jsonpath=\'{.status.conditions[?(@.type=="Ready")].status}\'');
+    check(stdout.trim() === 'True', 'KEDA ScaledObject is ready');
+
+    // Show scaling config
+    const { stdout: minReplicas } = await execAsync('kubectl get scaledobject worker-scaler -n batchsender -o jsonpath=\'{.spec.minReplicaCount}\'');
+    const { stdout: maxReplicas } = await execAsync('kubectl get scaledobject worker-scaler -n batchsender -o jsonpath=\'{.spec.maxReplicaCount}\'');
+    console.log(`    ${colors.cyan}→${colors.reset} Scaling range: ${minReplicas}-${maxReplicas} workers`);
+  } catch {
+    check(false, 'KEDA ScaledObject is ready');
+  }
+
+  // Check health endpoints
+  console.log(`${colors.cyan}[8/8]${colors.reset} Checking health endpoints...`);
+  try {
+    const { stdout } = await execAsync('kubectl get pods -l app=worker -n batchsender -o jsonpath=\'{.items[0].metadata.name}\'');
+    const workerPod = stdout.trim();
+
+    if (workerPod) {
+      // Test health endpoint
+      try {
+        const { stdout: healthResponse } = await execAsync(`kubectl exec -n batchsender ${workerPod} -- curl -s http://localhost:6001/health`);
+        check(healthResponse.includes('healthy'), 'Health endpoint responding');
+      } catch {
+        check(false, 'Health endpoint responding');
+      }
+
+      // Test metrics endpoint
+      try {
+        const { stdout: metricsResponse } = await execAsync(`kubectl exec -n batchsender ${workerPod} -- curl -s http://localhost:6001/api/metrics`);
+        check(metricsResponse.includes('worker_'), 'Metrics endpoint responding');
+      } catch {
+        check(false, 'Metrics endpoint responding');
+      }
+    } else {
+      check(false, 'No worker pods found to test endpoints');
+    }
+  } catch {
+    check(false, 'Health endpoint responding');
+  }
+
+  // Summary
+  console.log('');
+  console.log(`${colors.cyan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
+
+  if (errors === 0) {
+    console.log(`${colors.bold}${colors.green}✓ All checks passed! Deployment is healthy.${colors.reset}`);
+    console.log(`${colors.green}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
+    console.log('');
+    process.exit(0);
+  } else {
+    console.log(`${colors.bold}${colors.red}✗ Found ${errors} errors in deployment.${colors.reset}`);
+    console.log(`${colors.red}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
+    console.log('');
+    console.log(`${colors.yellow}Debugging information:${colors.reset}`);
+    try {
+      console.log(`\n${colors.bold}Pod Status:${colors.reset}`);
+      const { stdout: pods } = await execAsync('kubectl get pods -n batchsender');
+      console.log(pods);
+
+      console.log(`\n${colors.bold}Recent Events:${colors.reset}`);
+      const { stdout: events } = await execAsync('kubectl get events -n batchsender --sort-by=\'.lastTimestamp\' | tail -10');
+      console.log(events);
+    } catch (error) {
+      // Ignore errors in debugging output
+    }
+    console.log('');
+    process.exit(1);
+  }
+}
+
+async function main() {
+  // Parse command line arguments
+  const { values } = parseArgs({
+    options: {
+      verify: { type: 'boolean', default: false },
+    },
+    allowPositionals: false,
+  });
 
   // Check if kubectl can access cluster
   const hasAccess = await checkKubectlAccess();
 
   if (!hasAccess) {
+    console.log('');
     console.log(`  ${colors.red}✗ Cannot connect to Kubernetes cluster${colors.reset}`);
     console.log(`    ${colors.yellow}→${colors.reset} Check kubeconfig: ${colors.cyan}export KUBECONFIG=./kubeconfig${colors.reset}`);
     console.log('');
     process.exit(1);
   }
+
+  // Run verification mode if requested
+  if (values.verify) {
+    await runVerification();
+    return;
+  }
+
+  // Normal status display
+  console.log('');
+  console.log(`${colors.bold}${colors.cyan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
+  console.log(`${colors.bold}${colors.cyan}  Production Deployment Status${colors.reset}`);
+  console.log(`${colors.cyan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
+  console.log('');
 
   console.log(`  ${colors.green}✓${colors.reset} Connected to cluster\n`);
 
@@ -172,9 +343,10 @@ async function main() {
   console.log('');
 
   console.log(`  ${colors.bold}Quick Actions:${colors.reset}`);
-  console.log(`    • ${colors.cyan}pnpm prod:logs${colors.reset}   - View production logs`);
-  console.log(`    • ${colors.cyan}pnpm prod:shell${colors.reset}  - Access worker shell`);
-  console.log(`    • ${colors.cyan}pnpm deploy:check${colors.reset} - Validate before deploy`);
+  console.log(`    • ${colors.cyan}pnpm prod:logs${colors.reset}    - View production logs`);
+  console.log(`    • ${colors.cyan}pnpm prod:shell${colors.reset}   - Access worker shell`);
+  console.log(`    • ${colors.cyan}pnpm deploy:verify${colors.reset} - Run comprehensive health checks`);
+  console.log(`    • ${colors.cyan}pnpm deploy:check${colors.reset}  - Validate before deploy`);
   console.log('');
 }
 

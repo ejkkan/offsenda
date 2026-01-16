@@ -1,14 +1,18 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { Batch } from "@batchsender/db";
+import { useRouter } from "next/navigation";
+
+interface Batch {
+  id: string;
+  status: string;
+}
 
 export function BatchActions({ batch }: { batch: Batch }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
-  async function performAction(action: string) {
+  const handleAction = async (action: "queue" | "pause" | "resume") => {
     setLoading(true);
     try {
       const res = await fetch(`/api/batches/${batch.id}`, {
@@ -17,48 +21,46 @@ export function BatchActions({ batch }: { batch: Batch }) {
         body: JSON.stringify({ action }),
       });
 
-      if (!res.ok) {
+      if (res.ok) {
+        router.refresh();
+      } else {
         const data = await res.json();
         alert(data.error || "Action failed");
-      } else {
-        router.refresh();
       }
-    } catch {
+    } catch (error) {
       alert("Action failed");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   return (
     <div className="flex gap-2">
       {batch.status === "draft" && (
         <button
-          onClick={() => performAction("queue")}
+          onClick={() => handleAction("queue")}
           disabled={loading}
-          className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 disabled:opacity-50"
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
         >
-          Start Sending
+          {loading ? "..." : "Queue"}
         </button>
       )}
-
       {batch.status === "processing" && (
         <button
-          onClick={() => performAction("pause")}
+          onClick={() => handleAction("pause")}
           disabled={loading}
-          className="bg-orange-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-orange-700 disabled:opacity-50"
+          className="bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-yellow-700 disabled:opacity-50"
         >
-          Pause
+          {loading ? "..." : "Pause"}
         </button>
       )}
-
       {batch.status === "paused" && (
         <button
-          onClick={() => performAction("resume")}
+          onClick={() => handleAction("resume")}
           disabled={loading}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
+          className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
         >
-          Resume
+          {loading ? "..." : "Resume"}
         </button>
       )}
     </div>

@@ -148,6 +148,19 @@ export default async function BatchDetailPage({
               label="Created"
               value={new Date(batch.createdAt).toLocaleString()}
             />
+            {batch.scheduledAt && (
+              <Row
+                label="Scheduled For"
+                value={
+                  <span>
+                    {new Date(batch.scheduledAt).toLocaleString()}
+                    {batch.status === "scheduled" && (
+                      <span className="text-gray-500 text-xs ml-2">(auto-queues at this time)</span>
+                    )}
+                  </span>
+                }
+              />
+            )}
             {batch.startedAt && (
               <Row
                 label="Started"
@@ -230,6 +243,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     draft: "bg-gray-100 text-gray-800",
+    scheduled: "bg-indigo-100 text-indigo-800",
     queued: "bg-yellow-100 text-yellow-800",
     processing: "bg-blue-100 text-blue-800",
     completed: "bg-green-100 text-green-800",

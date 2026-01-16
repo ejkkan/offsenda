@@ -4,9 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-type ModuleType = "email" | "webhook";
+type ModuleType = "email" | "webhook" | "sms" | "push";
 type EmailMode = "managed" | "byok";
 type EmailProvider = "resend" | "ses";
+type SmsProvider = "twilio" | "aws-sns";
+type PushProvider = "fcm" | "apns";
 
 export default function NewSendConfigPage() {
   const router = useRouter();
@@ -32,6 +34,17 @@ export default function NewSendConfigPage() {
   const [webhookTimeout, setWebhookTimeout] = useState(30000);
   const [webhookRetries, setWebhookRetries] = useState(3);
 
+  // SMS config state
+  const [smsProvider, setSmsProvider] = useState<SmsProvider>("twilio");
+  const [smsAccountSid, setSmsAccountSid] = useState("");
+  const [smsAuthToken, setSmsAuthToken] = useState("");
+  const [smsFromNumber, setSmsFromNumber] = useState("");
+
+  // Push config state
+  const [pushProvider, setPushProvider] = useState<PushProvider>("fcm");
+  const [pushApiKey, setPushApiKey] = useState("");
+  const [pushProjectId, setPushProjectId] = useState("");
+
   // Rate limit state
   const [rateLimitEnabled, setRateLimitEnabled] = useState(false);
   const [ratePerSecond, setRatePerSecond] = useState(100);
@@ -55,13 +68,34 @@ export default function NewSendConfigPage() {
           ...(fromEmail && { fromEmail }),
           ...(fromName && { fromName }),
         };
-      } else {
+      } else if (module === "webhook") {
         config = {
           url: webhookUrl,
           method: webhookMethod,
           timeout: webhookTimeout,
           retries: webhookRetries,
         };
+      } else if (module === "sms") {
+        config = {
+          provider: smsProvider,
+          ...(smsProvider === "twilio" && {
+            accountSid: smsAccountSid,
+            authToken: smsAuthToken,
+          }),
+          ...(smsProvider === "aws-sns" && {
+            apiKey: smsAuthToken, // Reuse authToken field for API key
+            region,
+          }),
+          ...(smsFromNumber && { fromNumber: smsFromNumber }),
+        };
+      } else if (module === "push") {
+        config = {
+          provider: pushProvider,
+          apiKey: pushApiKey,
+          ...(pushProvider === "fcm" && { projectId: pushProjectId }),
+        };
+      } else {
+        throw new Error("Unknown module type");
       }
 
       const res = await fetch("/api/send-configs", {
@@ -130,30 +164,34 @@ export default function NewSendConfigPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-2">Module Type</label>
-            <div className="flex gap-4">
-              <label className="flex items-center">
-                <input
-                  type="radio"
-                  name="module"
-                  value="email"
-                  checked={module === "email"}
-                  onChange={() => setModule("email")}
-                  className="mr-2"
-                />
-                <span className="text-sm">Email</span>
-              </label>
-              <label className="flex items-center">
-                <input
-                  type="radio"
-                  name="module"
-                  value="webhook"
-                  checked={module === "webhook"}
-                  onChange={() => setModule("webhook")}
-                  className="mr-2"
-                />
-                <span className="text-sm">Webhook</span>
-              </label>
+            <label className="block text-sm font-medium mb-2">Channel Type</label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { value: "email", label: "Email", icon: "📧" },
+                { value: "sms", label: "SMS", icon: "📱" },
+                { value: "push", label: "Push", icon: "🔔" },
+                { value: "webhook", label: "Webhook", icon: "🔗" },
+              ].map((opt) => (
+                <label
+                  key={opt.value}
+                  className={`flex items-center justify-center p-3 border rounded-lg cursor-pointer transition-colors ${
+                    module === opt.value
+                      ? "border-blue-500 bg-blue-50 text-blue-700"
+                      : "border-gray-300 hover:border-gray-400"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="module"
+                    value={opt.value}
+                    checked={module === opt.value}
+                    onChange={() => setModule(opt.value as ModuleType)}
+                    className="sr-only"
+                  />
+                  <span className="mr-2">{opt.icon}</span>
+                  <span className="text-sm font-medium">{opt.label}</span>
+                </label>
+              ))}
             </div>
           </div>
 
@@ -302,6 +340,211 @@ export default function NewSendConfigPage() {
                 />
               </div>
             </div>
+          </div>
+        )}
+
+        {/* SMS Configuration */}
+        {module === "sms" && (
+          <div className="bg-white rounded-lg shadow p-6 space-y-4">
+            <h2 className="text-lg font-medium">SMS Configuration</h2>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Provider</label>
+              <div className="flex gap-4">
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    name="smsProvider"
+                    value="twilio"
+                    checked={smsProvider === "twilio"}
+                    onChange={() => setSmsProvider("twilio")}
+                    className="mr-2"
+                  />
+                  <span className="text-sm">Twilio</span>
+                </label>
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    name="smsProvider"
+                    value="aws-sns"
+                    checked={smsProvider === "aws-sns"}
+                    onChange={() => setSmsProvider("aws-sns")}
+                    className="mr-2"
+                  />
+                  <span className="text-sm">AWS SNS</span>
+                </label>
+              </div>
+            </div>
+
+            {smsProvider === "twilio" && (
+              <>
+                <div>
+                  <label htmlFor="smsAccountSid" className="block text-sm font-medium mb-1">
+                    Account SID
+                  </label>
+                  <input
+                    type="text"
+                    id="smsAccountSid"
+                    value={smsAccountSid}
+                    onChange={(e) => setSmsAccountSid(e.target.value)}
+                    required
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="smsAuthToken" className="block text-sm font-medium mb-1">
+                    Auth Token
+                  </label>
+                  <input
+                    type="password"
+                    id="smsAuthToken"
+                    value={smsAuthToken}
+                    onChange={(e) => setSmsAuthToken(e.target.value)}
+                    required
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    placeholder="Your Twilio Auth Token"
+                  />
+                </div>
+              </>
+            )}
+
+            {smsProvider === "aws-sns" && (
+              <>
+                <div>
+                  <label htmlFor="smsAuthToken" className="block text-sm font-medium mb-1">
+                    API Key (accessKeyId:secretAccessKey)
+                  </label>
+                  <input
+                    type="password"
+                    id="smsAuthToken"
+                    value={smsAuthToken}
+                    onChange={(e) => setSmsAuthToken(e.target.value)}
+                    required
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    placeholder="AKIAIOSFODNN7EXAMPLE:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="smsRegion" className="block text-sm font-medium mb-1">
+                    AWS Region
+                  </label>
+                  <select
+                    id="smsRegion"
+                    value={region}
+                    onChange={(e) => setRegion(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                  >
+                    <option value="us-east-1">US East (N. Virginia)</option>
+                    <option value="us-west-2">US West (Oregon)</option>
+                    <option value="eu-west-1">Europe (Ireland)</option>
+                    <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            <div>
+              <label htmlFor="smsFromNumber" className="block text-sm font-medium mb-1">
+                Default From Number (optional)
+              </label>
+              <input
+                type="text"
+                id="smsFromNumber"
+                value={smsFromNumber}
+                onChange={(e) => setSmsFromNumber(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                placeholder="+15551234567"
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                Include country code (e.g., +1 for US)
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Push Configuration */}
+        {module === "push" && (
+          <div className="bg-white rounded-lg shadow p-6 space-y-4">
+            <h2 className="text-lg font-medium">Push Notification Configuration</h2>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Provider</label>
+              <div className="flex gap-4">
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    name="pushProvider"
+                    value="fcm"
+                    checked={pushProvider === "fcm"}
+                    onChange={() => setPushProvider("fcm")}
+                    className="mr-2"
+                  />
+                  <span className="text-sm">Firebase Cloud Messaging (FCM)</span>
+                </label>
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    name="pushProvider"
+                    value="apns"
+                    checked={pushProvider === "apns"}
+                    onChange={() => setPushProvider("apns")}
+                    className="mr-2"
+                  />
+                  <span className="text-sm">Apple Push (APNs)</span>
+                </label>
+              </div>
+            </div>
+
+            {pushProvider === "fcm" && (
+              <>
+                <div>
+                  <label htmlFor="pushProjectId" className="block text-sm font-medium mb-1">
+                    Firebase Project ID
+                  </label>
+                  <input
+                    type="text"
+                    id="pushProjectId"
+                    value={pushProjectId}
+                    onChange={(e) => setPushProjectId(e.target.value)}
+                    required
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    placeholder="my-firebase-project"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="pushApiKey" className="block text-sm font-medium mb-1">
+                    Server Key / API Key
+                  </label>
+                  <input
+                    type="password"
+                    id="pushApiKey"
+                    value={pushApiKey}
+                    onChange={(e) => setPushApiKey(e.target.value)}
+                    required
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    placeholder="Your FCM Server Key"
+                  />
+                </div>
+              </>
+            )}
+
+            {pushProvider === "apns" && (
+              <div>
+                <label htmlFor="pushApiKey" className="block text-sm font-medium mb-1">
+                  APNs Auth Key (p8 contents)
+                </label>
+                <textarea
+                  id="pushApiKey"
+                  value={pushApiKey}
+                  onChange={(e) => setPushApiKey(e.target.value)}
+                  required
+                  rows={4}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 font-mono text-sm"
+                  placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"
+                />
+              </div>
+            )}
           </div>
         )}
 

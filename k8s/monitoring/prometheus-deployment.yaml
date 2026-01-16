@@ -10,6 +10,17 @@ data:
       evaluation_interval: 15s
 
     scrape_configs:
+      # Scrape Prometheus itself
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+
+      # Scrape kube-state-metrics for cluster data (nodes, pods, deployments, HPA)
+      - job_name: 'kube-state-metrics'
+        static_configs:
+          - targets: ['kube-state-metrics:8080']
+
+      # Scrape batchsender worker pods - ALL metrics
       - job_name: 'batchsender-worker'
         kubernetes_sd_configs:
           - role: pod
@@ -21,25 +32,18 @@ data:
             action: keep
             regex: worker
           - source_labels: [__meta_kubernetes_pod_name]
-            target_label: instance
-          - target_label: __address__
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
             replacement: '${1}:6001'
-            source_labels: [__meta_kubernetes_pod_ip]
-        metric_relabel_configs:
-          - source_labels: [__name__]
-            regex: 'nats_queue_depth.*'
-            action: keep
+          - target_label: __metrics_path__
+            replacement: /api/metrics
 
-      - job_name: 'node-exporter'
-        kubernetes_sd_configs:
-          - role: pod
-            namespaces:
-              names:
-                - batchsender
-        relabel_configs:
-          - source_labels: [__meta_kubernetes_pod_label_app]
-            action: keep
-            regex: node-exporter
+      # Scrape NATS metrics
+      - job_name: 'nats'
+        static_configs:
+          - targets: ['nats:8222']
+        metrics_path: /metrics
 
 ---
 apiVersion: apps/v1
@@ -60,11 +64,13 @@ spec:
       serviceAccountName: prometheus
       containers:
       - name: prometheus
-        image: prom/prometheus:latest
+        image: prom/prometheus:v2.48.0
         args:
           - '--config.file=/etc/prometheus/prometheus.yml'
           - '--storage.tsdb.path=/prometheus'
+          - '--storage.tsdb.retention.time=30d'
           - '--web.enable-lifecycle'
+          - '--web.enable-admin-api'
         ports:
         - containerPort: 9090
         volumeMounts:
@@ -75,16 +81,43 @@ spec:
         resources:
           requests:
             memory: "512Mi"
-            cpu: "500m"
+            cpu: "250m"
           limits:
-            memory: "1Gi"
+            memory: "2Gi"
             cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: 9090
+          initialDelaySeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: 9090
+          initialDelaySeconds: 5
+          timeoutSeconds: 10
       volumes:
       - name: config
         configMap:
           name: prometheus-config
       - name: storage
-        emptyDir: {}  # Consider using PersistentVolume for production
+        persistentVolumeClaim:
+          claimName: prometheus-pvc
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-pvc
+  namespace: batchsender
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: hcloud-volumes
 
 ---
 apiVersion: v1
@@ -115,10 +148,18 @@ rules:
 - apiGroups: [""]
   resources:
   - nodes
+  - nodes/proxy
+  - nodes/metrics
   - services
   - endpoints
   - pods
   verbs: ["get", "list", "watch"]
+- apiGroups: ["extensions", "networking.k8s.io"]
+  resources:
+  - ingresses
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+  verbs: ["get"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -142,9 +183,9 @@ metadata:
   namespace: batchsender
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    # Basic auth for security (optional but recommended)
-    # nginx.ingress.kubernetes.io/auth-type: basic
-    # nginx.ingress.kubernetes.io/auth-secret: prometheus-basic-auth
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: prometheus-basic-auth
+    nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
 spec:
   ingressClassName: nginx
   tls:
@@ -162,3 +203,7 @@ spec:
             name: prometheus
             port:
               number: 9090
+
+---
+# Note: prometheus-basic-auth secret is created by sealed secret (k8s/monitoring/sealed-prometheus-auth.yaml)
+# Run: pnpm seal-secrets to generate it from .env.prod
