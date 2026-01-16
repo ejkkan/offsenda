@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 5001",
+    "dev:local": "dotenv -e .env.local -- next dev -p 5001",
+    "dev:prod": "dotenv -e .env.remote -- next dev -p 5001",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -11,12 +13,12 @@
   },
   "dependencies": {
     "@batchsender/db": "workspace:*",
-    "next": "14.1.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "next-auth": "^4.24.5",
     "bcryptjs": "^2.4.3",
     "drizzle-orm": "^0.29.3",
+    "next": "14.1.0",
+    "next-auth": "^4.24.5",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {
@@ -25,6 +27,7 @@
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "autoprefixer": "^10.4.17",
+    "dotenv-cli": "^7.4.4",
     "postcss": "^8.4.33",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3"
