@@ -2,83 +2,84 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../../base
+- ../../base
 
 # Production patches
-patches:
   # Use production image from container registry
-  - patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/0/image
-        value: ghcr.io/ejkkan/offsenda-worker:latest
-    target:
-      kind: Deployment
-      name: worker
 
   # Use real email provider
-  - patch: |-
-      - op: replace
-        path: /data/EMAIL_PROVIDER
-        value: resend
-      - op: replace
-        path: /data/NODE_ENV
-        value: production
-    target:
-      kind: ConfigMap
-      name: worker-config
 
   # Higher resource limits for production
-  - patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/0/resources/requests/cpu
-        value: 200m
-      - op: replace
-        path: /spec/template/spec/containers/0/resources/requests/memory
-        value: 512Mi
-      - op: replace
-        path: /spec/template/spec/containers/0/resources/limits/cpu
-        value: 1000m
-      - op: replace
-        path: /spec/template/spec/containers/0/resources/limits/memory
-        value: 1Gi
-    target:
-      kind: Deployment
-      name: worker
 
   # KEDA autoscaling for production (instant scaling based on queue depth)
-  - patch: |-
-      - op: replace
-        path: /spec/maxReplicaCount
-        value: 50
-      - op: replace
-        path: /spec/minReplicaCount
-        value: 2
-    target:
-      kind: ScaledObject
-      name: worker-scaler
 
   # For testing with limited resources, scale down NATS to 1 replica
-  - patch: |-
-      - op: replace
-        path: /spec/replicas
-        value: 1
-    target:
-      kind: StatefulSet
-      name: nats
 
   # Configure NATS for single-node mode
-  - patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/0/args
-        value:
-          - --jetstream
-          - --store_dir=/data
-          - --name=$(POD_NAME)
-          - --http_port=8222
-          - --port=4222
-    target:
-      kind: StatefulSet
-      name: nats
-
-# Production secrets should be managed separately (e.g., sealed-secrets, external-secrets)
-# DO NOT commit real secrets to git
+patches:
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/image
+      value: ghcr.io/ejkkan/offsenda-worker:latest
+  target:
+    kind: Deployment
+    name: worker
+- patch: |-
+    - op: replace
+      path: /data/EMAIL_PROVIDER
+      value: resend
+    - op: replace
+      path: /data/NODE_ENV
+      value: production
+  target:
+    kind: ConfigMap
+    name: worker-config
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: 200m
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: 512Mi
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: 1000m
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: 1Gi
+  target:
+    kind: Deployment
+    name: worker
+- patch: |-
+    - op: replace
+      path: /spec/maxReplicaCount
+      value: 50
+    - op: replace
+      path: /spec/minReplicaCount
+      value: 2
+  target:
+    kind: ScaledObject
+    name: worker-scaler
+- patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 1
+  target:
+    kind: StatefulSet
+    name: nats
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/args
+      value:
+        - --jetstream
+        - --store_dir=/data
+        - --name=$(POD_NAME)
+        - --http_port=8222
+        - --port=4222
+  target:
+    kind: StatefulSet
+    name: nats
+images:
+- name: worker
+  newName: ghcr.io/ejkkan/offsenda/worker
+  newTag: 1596e9441182f124f5273ac692a4c5ff763c3bdd
