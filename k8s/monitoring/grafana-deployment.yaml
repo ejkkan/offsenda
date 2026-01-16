@@ -37,6 +37,31 @@ data:
         url: http://prometheus:9090
         isDefault: true
         editable: false
+      - name: ClickHouse
+        type: grafana-clickhouse-datasource
+        uid: clickhouse
+        access: proxy
+        jsonData:
+          host: clickhouse
+          port: 8123
+          protocol: http
+          defaultDatabase: default
+          username: $__env{CLICKHOUSE_USER}
+        secureJsonData:
+          password: $__env{CLICKHOUSE_PASSWORD}
+        editable: false
+      - name: PostgreSQL
+        type: postgres
+        uid: postgres
+        url: ep-raspy-hat-ahcdzwko-pooler.c-3.us-east-1.aws.neon.tech:5432
+        database: neondb
+        user: neondb_owner
+        secureJsonData:
+          password: $__env{NEON_DB_PASSWORD}
+        jsonData:
+          sslmode: require
+          postgresVersion: 1600
+        editable: false
 
 ---
 apiVersion: v1
@@ -66,9 +91,7 @@ metadata:
 data:
   batchsender.json: |
     {
-      "annotations": {
-        "list": []
-      },
+      "annotations": { "list": [] },
       "editable": true,
       "fiscalYearStartMonth": 0,
       "graphTooltip": 0,
@@ -77,7 +100,15 @@ data:
       "liveNow": false,
       "panels": [
         {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+          "id": 200,
+          "panels": [],
+          "title": "Key Business Metrics (Persistent)",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -85,15 +116,21 @@ data:
               "unit": "short"
             }
           },
-          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
           "id": 1,
           "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(emails_sent_total) or vector(0)", "instant": true, "refId": "A" }],
-          "title": "Total Emails Sent",
+          "targets": [{
+            "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+            "queryType": "sql",
+            "rawSql": "SELECT count() as value FROM email_events WHERE event_type = 'sent'",
+            "refId": "A",
+            "format": 1
+          }],
+          "title": "Emails Sent (CH)",
           "type": "stat"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "datasource": { "type": "postgres", "uid": "postgres" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -101,15 +138,20 @@ data:
               "unit": "short"
             }
           },
-          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
           "id": 2,
           "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(batches_processed_total) or vector(0)", "instant": true, "refId": "A" }],
-          "title": "Total Batches",
+          "targets": [{
+            "datasource": { "type": "postgres", "uid": "postgres" },
+            "rawSql": "SELECT count(*) FROM batches WHERE status = 'completed'",
+            "refId": "A",
+            "format": "table"
+          }],
+          "title": "Batches Complete (PG)",
           "type": "stat"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "datasource": { "type": "postgres", "uid": "postgres" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -117,15 +159,20 @@ data:
               "unit": "short"
             }
           },
-          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
           "id": 3,
           "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "count(kube_pod_info{namespace=\"batchsender\",pod=~\"worker.*\"})", "instant": true, "refId": "A" }],
-          "title": "Worker Pods",
+          "targets": [{
+            "datasource": { "type": "postgres", "uid": "postgres" },
+            "rawSql": "SELECT count(*) FROM users",
+            "refId": "A",
+            "format": "table"
+          }],
+          "title": "Total Users (PG)",
           "type": "stat"
         },
         {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "datasource": { "type": "postgres", "uid": "postgres" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -133,12 +180,231 @@ data:
               "unit": "short"
             }
           },
-          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
           "id": 4,
           "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
-          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "count(kube_node_info)", "instant": true, "refId": "A" }],
-          "title": "Cluster Nodes",
+          "targets": [{
+            "datasource": { "type": "postgres", "uid": "postgres" },
+            "rawSql": "SELECT count(*) FROM send_configs WHERE is_active = true",
+            "refId": "A",
+            "format": "table"
+          }],
+          "title": "Active Configs (PG)",
           "type": "stat"
+        },
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "yellow", "value": null }] },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+          "id": 5,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{
+            "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+            "queryType": "sql",
+            "rawSql": "SELECT count(DISTINCT email) as value FROM email_events",
+            "refId": "A",
+            "format": 1
+          }],
+          "title": "Unique Recipients (CH)",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "semi-dark-blue", "value": null }] },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+          "id": 6,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{
+            "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+            "queryType": "sql",
+            "rawSql": "SELECT count(DISTINCT user_id) as value FROM email_events",
+            "refId": "A",
+            "format": 1
+          }],
+          "title": "Users Who Sent (CH)",
+          "type": "stat"
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+          "id": 201,
+          "panels": [],
+          "title": "Delivery Health (Persistent)",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 90 }, { "color": "green", "value": 98 }] },
+              "unit": "percent",
+              "decimals": 1
+            }
+          },
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 6 },
+          "id": 10,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{
+            "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+            "queryType": "sql",
+            "rawSql": "SELECT countIf(event_type='delivered') * 100.0 / nullIf(countIf(event_type='sent'), 0) as value FROM email_events",
+            "refId": "A",
+            "format": 1
+          }],
+          "title": "Delivery Rate %",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 5 }] },
+              "unit": "percent",
+              "decimals": 2
+            }
+          },
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 6 },
+          "id": 11,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{
+            "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+            "queryType": "sql",
+            "rawSql": "SELECT countIf(event_type='bounced') * 100.0 / nullIf(countIf(event_type='sent'), 0) as value FROM email_events",
+            "refId": "A",
+            "format": 1
+          }],
+          "title": "Bounce Rate %",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 15 }, { "color": "green", "value": 25 }] },
+              "unit": "percent",
+              "decimals": 1
+            }
+          },
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 6 },
+          "id": 12,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{
+            "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+            "queryType": "sql",
+            "rawSql": "SELECT countIf(event_type='opened') * 100.0 / nullIf(countIf(event_type='delivered'), 0) as value FROM email_events",
+            "refId": "A",
+            "format": 1
+          }],
+          "title": "Open Rate %",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.05 }, { "color": "red", "value": 0.1 }] },
+              "unit": "percent",
+              "decimals": 3
+            }
+          },
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 6 },
+          "id": 13,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{
+            "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+            "queryType": "sql",
+            "rawSql": "SELECT countIf(event_type='complained') * 100.0 / nullIf(countIf(event_type='sent'), 0) as value FROM email_events",
+            "refId": "A",
+            "format": 1
+          }],
+          "title": "Complaint Rate %",
+          "type": "stat"
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 10 },
+          "id": 202,
+          "panels": [],
+          "title": "Events Over Time (Persistent)",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "stacking": { "mode": "none" } }, "unit": "short" } },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 11 },
+          "id": 20,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "targets": [{
+            "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+            "queryType": "sql",
+            "rawSql": "SELECT toStartOfDay(event_time) as time, event_type, count() as value FROM email_events WHERE event_time >= now() - INTERVAL 30 DAY GROUP BY time, event_type ORDER BY time",
+            "refId": "A",
+            "format": 0
+          }],
+          "title": "Daily Events by Type",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+          "id": 203,
+          "panels": [],
+          "title": "Config & Batch Breakdown",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "postgres", "uid": "postgres" },
+          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" } } },
+          "gridPos": { "h": 6, "w": 12, "x": 0, "y": 20 },
+          "id": 30,
+          "options": { "legend": { "displayMode": "list", "placement": "right" }, "pieType": "pie", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "tooltip": { "mode": "single" } },
+          "targets": [{
+            "datasource": { "type": "postgres", "uid": "postgres" },
+            "rawSql": "SELECT module, count(*) as value FROM send_configs GROUP BY module",
+            "refId": "A",
+            "format": "table"
+          }],
+          "title": "Configs by Module",
+          "type": "piechart"
+        },
+        {
+          "datasource": { "type": "postgres", "uid": "postgres" },
+          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" } } },
+          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 20 },
+          "id": 31,
+          "options": { "legend": { "displayMode": "list", "placement": "right" }, "pieType": "pie", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "tooltip": { "mode": "single" } },
+          "targets": [{
+            "datasource": { "type": "postgres", "uid": "postgres" },
+            "rawSql": "SELECT status, count(*) as value FROM batches GROUP BY status",
+            "refId": "A",
+            "format": "table"
+          }],
+          "title": "Batches by Status",
+          "type": "piechart"
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+          "id": 100,
+          "panels": [],
+          "title": "Platform Health (Real-time)",
+          "type": "row"
         },
         {
           "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
@@ -149,8 +415,8 @@ data:
               "unit": "short"
             }
           },
-          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
-          "id": 5,
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 27 },
+          "id": 40,
           "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
           "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "nats_queue_depth_total", "refId": "A" }],
           "title": "Queue Depth",
@@ -165,28 +431,95 @@ data:
               "unit": "s"
             }
           },
-          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
-          "id": 6,
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 27 },
+          "id": 41,
           "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
           "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "histogram_quantile(0.95, sum(rate(email_send_duration_seconds_bucket[5m])) by (le)) or vector(0)", "instant": true, "refId": "A" }],
-          "title": "Email Latency (p95)",
+          "title": "Latency (p95)",
           "type": "stat"
         },
         {
           "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2 }, "unit": "short" } },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-          "id": 10,
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 400 }, { "color": "red", "value": 480 }] },
+              "unit": "decmbytes"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 27 },
+          "id": 42,
+          "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(container_memory_working_set_bytes{namespace=\"batchsender\",pod=~\"worker.*\"}) / 1024 / 1024", "instant": true, "refId": "A" }],
+          "title": "Worker Memory (MB)",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+              "unit": "reqps"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 27 },
+          "id": 43,
+          "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(rate(http_requests_total{namespace=\"batchsender\"}[5m])) or vector(0)", "instant": true, "refId": "A" }],
+          "title": "HTTP Rate",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 27 },
+          "id": 44,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "count(kube_pod_info{namespace=\"batchsender\",pod=~\"worker.*\"})", "instant": true, "refId": "A" }],
+          "title": "Worker Pods",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }] },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 27 },
+          "id": 45,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "count(kube_node_info)", "instant": true, "refId": "A" }],
+          "title": "Cluster Nodes",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1 }, "unit": "short" } },
+          "gridPos": { "h": 6, "w": 12, "x": 0, "y": 31 },
+          "id": 50,
           "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
-          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(increase(emails_sent_total[1m]))", "legendFormat": "Emails Sent", "refId": "A" }],
-          "title": "Emails Sent (per minute)",
+          "targets": [
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "nats_queue_depth_batch_processor", "legendFormat": "Batch Processor", "refId": "A" },
+            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "nats_queue_depth_email_processor", "legendFormat": "Email Processor", "refId": "B" }
+          ],
+          "title": "Queue Depth Over Time",
           "type": "timeseries"
         },
         {
           "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
           "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }, "unit": "s" } },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-          "id": 11,
+          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 31 },
+          "id": 51,
           "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
           "targets": [
             { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "histogram_quantile(0.50, sum(rate(email_send_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
@@ -198,8 +531,8 @@ data:
         },
         {
           "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 12 },
-          "id": 100,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 },
+          "id": 101,
           "panels": [],
           "title": "Kubernetes Cluster",
           "type": "row"
@@ -207,8 +540,8 @@ data:
         {
           "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
           "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2 }, "unit": "short" } },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
-          "id": 20,
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 38 },
+          "id": 60,
           "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
           "targets": [
             { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "count(kube_pod_info{namespace=\"batchsender\",pod=~\"worker.*\"})", "legendFormat": "Worker Pods", "refId": "A" },
@@ -221,8 +554,8 @@ data:
         {
           "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
           "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }, "unit": "percent" } },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
-          "id": 21,
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 38 },
+          "id": 61,
           "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
           "targets": [
             { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "100 * sum(rate(container_cpu_usage_seconds_total{namespace=\"batchsender\",pod=~\"worker.*\"}[5m])) / sum(kube_pod_container_resource_requests{namespace=\"batchsender\",pod=~\"worker.*\",resource=\"cpu\"})", "legendFormat": "CPU %", "refId": "A" },
@@ -230,49 +563,18 @@ data:
           ],
           "title": "Worker Resource Usage",
           "type": "timeseries"
-        },
-        {
-          "collapsed": false,
-          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 },
-          "id": 101,
-          "panels": [],
-          "title": "Queue & Events",
-          "type": "row"
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1 }, "unit": "short" } },
-          "gridPos": { "h": 6, "w": 12, "x": 0, "y": 22 },
-          "id": 30,
-          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
-          "targets": [
-            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "nats_queue_depth_batch_processor", "legendFormat": "Batch Processor", "refId": "A" },
-            { "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "nats_queue_depth_email_processor", "legendFormat": "Email Processor", "refId": "B" }
-          ],
-          "title": "Queue Depth",
-          "type": "timeseries"
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-          "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "stacking": { "mode": "normal" } }, "unit": "short" } },
-          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 22 },
-          "id": 31,
-          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
-          "targets": [{ "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" }, "expr": "sum(increase(clickhouse_events_total[1m])) by (event_type)", "legendFormat": "{{event_type}}", "refId": "A" }],
-          "title": "Events by Type",
-          "type": "timeseries"
         }
       ],
-      "refresh": "10s",
+      "refresh": "30s",
       "schemaVersion": 39,
       "tags": ["batchsender", "production"],
       "templating": { "list": [] },
-      "time": { "from": "now-1h", "to": "now" },
+      "time": { "from": "now-24h", "to": "now" },
       "timepicker": {},
       "timezone": "",
       "title": "BatchSender Production",
       "uid": "batchsender-prod",
-      "version": 1
+      "version": 2
     }
 
 ---
@@ -304,11 +606,28 @@ spec:
         ports:
         - containerPort: 3000
         env:
+        - name: GF_INSTALL_PLUGINS
+          value: "grafana-clickhouse-datasource"
         - name: GF_SECURITY_ADMIN_PASSWORD
           valueFrom:
             secretKeyRef:
               name: grafana-secret
               key: admin-password
+        - name: NEON_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: grafana-secret
+              key: neon-db-password
+        - name: CLICKHOUSE_USER
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-secrets
+              key: user
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: clickhouse-secrets
+              key: password
         volumeMounts:
         - name: grafana-config
           mountPath: /etc/grafana/grafana.ini

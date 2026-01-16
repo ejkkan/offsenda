@@ -34,6 +34,7 @@ interface EnvSecrets {
   NEXTAUTH_SECRET: string;
   GRAFANA_ADMIN_PASSWORD: string;
   PROMETHEUS_ADMIN_PASSWORD: string;
+  NEON_DB_PASSWORD: string;
 }
 
 /**
@@ -81,6 +82,7 @@ async function checkPrerequisites(): Promise<void> {
     console.log('  - NEXTAUTH_SECRET');
     console.log('  - GRAFANA_ADMIN_PASSWORD');
     console.log('  - PROMETHEUS_ADMIN_PASSWORD');
+    console.log('  - NEON_DB_PASSWORD');
     console.log('');
     process.exit(1);
   }
@@ -138,6 +140,7 @@ function validateSecrets(secrets: Partial<EnvSecrets>): EnvSecrets {
     'NEXTAUTH_SECRET',
     'GRAFANA_ADMIN_PASSWORD',
     'PROMETHEUS_ADMIN_PASSWORD',
+    'NEON_DB_PASSWORD',
   ];
 
   const missing: string[] = [];
@@ -278,6 +281,7 @@ async function sealSecrets(secrets: EnvSecrets): Promise<void> {
     'batchsender',
     {
       'admin-password': secrets.GRAFANA_ADMIN_PASSWORD,
+      'neon-db-password': secrets.NEON_DB_PASSWORD,
     },
     'k8s/monitoring/sealed-grafana-secret.yaml'
   );
