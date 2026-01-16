@@ -39,12 +39,12 @@ spec:
             memory: 128Mi
         livenessProbe:
           httpGet:
-            path: /healthz
+            path: /metrics
             port: 7777
           initialDelaySeconds: 10
         readinessProbe:
           httpGet:
-            path: /healthz
+            path: /metrics
             port: 7777
           initialDelaySeconds: 5
 
