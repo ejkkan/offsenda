@@ -82,4 +82,4 @@ patches:
 images:
 - name: worker
   newName: ghcr.io/ejkkan/offsenda/worker
-  newTag: f662b296c947fa83f694218f629849526bdda839
+  newTag: d7ca20f156091245a2545e7debe579e24e88683c
