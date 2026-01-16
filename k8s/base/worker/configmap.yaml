@@ -14,7 +14,7 @@ data:
   DRAGONFLY_URL: "dragonfly.batchsender.svc:6379"
   NATS_CLUSTER: "nats://nats.batchsender.svc:4222"
   CLICKHOUSE_URL: "http://clickhouse.batchsender.svc:8123"
-  CLICKHOUSE_DATABASE: "default"
+  CLICKHOUSE_DATABASE: "batchsender"
   CLICKHOUSE_USER: "default"
 
   # Worker settings
