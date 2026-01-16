@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { batches, recipients } from "@batchsender/db";
+import type { BatchPayload, EmailBatchPayload, SmsBatchPayload, PushBatchPayload, WebhookBatchPayload, ModuleType } from "@batchsender/db";
 import { eq, and, sql } from "drizzle-orm";
 import { BatchActions } from "./batch-actions";
 
@@ -18,6 +19,14 @@ export default async function BatchDetailPage({
       eq(batches.id, params.id),
       eq(batches.userId, session!.user.id)
     ),
+    with: {
+      sendConfig: {
+        columns: {
+          module: true,
+          name: true,
+        },
+      },
+    },
   });
 
   if (!batch) {
@@ -43,12 +52,47 @@ export default async function BatchDetailPage({
     statusCounts.map((s) => [s.status, s.count])
   );
 
+  const moduleType: ModuleType = batch.sendConfig?.module || "email";
+
+  // Compute batch content summary based on module type
+  let contentSummary = batch.subject || "-";
+  if (batch.payload) {
+    const payload = batch.payload as Record<string, unknown>;
+    if ("subject" in payload) {
+      contentSummary = (payload as EmailBatchPayload).subject || "-";
+    } else if ("message" in payload) {
+      contentSummary = (payload as SmsBatchPayload).message || "-";
+    } else if ("title" in payload) {
+      contentSummary = (payload as PushBatchPayload).title || "-";
+    } else if ("body" in payload) {
+      contentSummary = JSON.stringify((payload as WebhookBatchPayload).body).slice(0, 100);
+    }
+  }
+
+  // Compute "from" information based on module type
+  let fromInfo: string | null = null;
+  if (moduleType === "email") {
+    if (batch.fromEmail) {
+      fromInfo = `${batch.fromName || ""} <${batch.fromEmail}>`.trim();
+    } else if (batch.payload && "fromEmail" in batch.payload) {
+      const payload = batch.payload as EmailBatchPayload;
+      fromInfo = `${payload.fromName || ""} <${payload.fromEmail}>`.trim();
+    }
+  } else if (moduleType === "sms") {
+    if (batch.payload && "fromNumber" in batch.payload) {
+      fromInfo = (batch.payload as SmsBatchPayload).fromNumber || null;
+    }
+  }
+
   return (
     <div>
       <div className="flex justify-between items-start mb-6">
         <div>
-          <h1 className="text-2xl font-bold">{batch.name}</h1>
-          <p className="text-gray-500">{batch.subject}</p>
+          <div className="flex items-center gap-2 mb-1">
+            <h1 className="text-2xl font-bold">{batch.name}</h1>
+            <ModuleBadge module={moduleType} />
+          </div>
+          <p className="text-gray-500">{contentSummary}</p>
         </div>
         <BatchActions batch={batch} />
       </div>
@@ -93,7 +137,13 @@ export default async function BatchDetailPage({
           </div>
           <div className="p-6 space-y-3 text-sm">
             <Row label="Status" value={<StatusBadge status={batch.status} />} />
-            <Row label="From" value={`${batch.fromName || ""} <${batch.fromEmail}>`} />
+            <Row label="Channel" value={<ModuleBadge module={moduleType} />} />
+            {batch.sendConfig && (
+              <Row label="Config" value={batch.sendConfig.name} />
+            )}
+            {fromInfo && (
+              <Row label="From" value={fromInfo} />
+            )}
             <Row
               label="Created"
               value={new Date(batch.createdAt).toLocaleString()}
@@ -121,7 +171,7 @@ export default async function BatchDetailPage({
             {recentRecipients.map((r) => (
               <div key={r.id} className="px-6 py-3 flex justify-between items-center">
                 <div>
-                  <div className="font-medium text-sm">{r.email}</div>
+                  <div className="font-medium text-sm">{r.identifier || r.email}</div>
                   {r.name && <div className="text-xs text-gray-500">{r.name}</div>}
                 </div>
                 <RecipientStatusBadge status={r.status} />
@@ -131,6 +181,23 @@ export default async function BatchDetailPage({
         </div>
       </div>
     </div>
+  );
+}
+
+function ModuleBadge({ module }: { module: string }) {
+  const config: Record<string, { label: string; color: string }> = {
+    email: { label: "Email", color: "bg-blue-100 text-blue-800" },
+    sms: { label: "SMS", color: "bg-green-100 text-green-800" },
+    push: { label: "Push", color: "bg-purple-100 text-purple-800" },
+    webhook: { label: "Webhook", color: "bg-orange-100 text-orange-800" },
+  };
+
+  const { label, color } = config[module] || { label: module, color: "bg-gray-100 text-gray-800" };
+
+  return (
+    <span className={`inline-block px-2 py-1 text-xs font-medium rounded ${color}`}>
+      {label}
+    </span>
   );
 }
 

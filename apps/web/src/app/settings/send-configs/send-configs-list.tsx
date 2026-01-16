@@ -4,10 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
+type ModuleType = "email" | "webhook" | "sms" | "push";
+
 interface SendConfig {
   id: string;
   name: string;
-  module: "email" | "webhook";
+  module: ModuleType;
   config: Record<string, unknown>;
   rateLimit: { perSecond?: number; perMinute?: number; dailyLimit?: number } | null;
   isDefault: boolean;
@@ -190,15 +192,24 @@ export function SendConfigsList({ initialConfigs }: { initialConfigs: SendConfig
   );
 }
 
-function ModuleBadge({ module }: { module: "email" | "webhook" }) {
-  const styles = {
-    email: "bg-purple-100 text-purple-800",
+function ModuleBadge({ module }: { module: ModuleType }) {
+  const styles: Record<ModuleType, string> = {
+    email: "bg-blue-100 text-blue-800",
     webhook: "bg-orange-100 text-orange-800",
+    sms: "bg-green-100 text-green-800",
+    push: "bg-purple-100 text-purple-800",
+  };
+
+  const labels: Record<ModuleType, string> = {
+    email: "Email",
+    webhook: "Webhook",
+    sms: "SMS",
+    push: "Push",
   };
 
   return (
     <span className={`inline-block px-2 py-1 text-xs font-medium rounded ${styles[module]}`}>
-      {module}
+      {labels[module]}
     </span>
   );
 }
@@ -222,6 +233,26 @@ function ConfigDetails({ config }: { config: SendConfig }) {
     return (
       <span className="truncate max-w-xs block" title={webhookConfig.url}>
         {webhookConfig.method || "POST"}: {webhookConfig.url}
+      </span>
+    );
+  }
+
+  if (config.module === "sms") {
+    const smsConfig = config.config as { provider?: string; fromNumber?: string };
+    return (
+      <span>
+        {smsConfig.provider}
+        {smsConfig.fromNumber && ` (${smsConfig.fromNumber})`}
+      </span>
+    );
+  }
+
+  if (config.module === "push") {
+    const pushConfig = config.config as { provider?: string; appId?: string };
+    return (
+      <span>
+        {pushConfig.provider}
+        {pushConfig.appId && ` (${pushConfig.appId})`}
       </span>
     );
   }

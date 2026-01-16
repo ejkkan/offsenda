@@ -26,6 +26,8 @@ export const batchStatusEnum = pgEnum("batch_status", [
 export const moduleTypeEnum = pgEnum("module_type", [
   "email",
   "webhook",
+  "sms",
+  "push",
 ]);
 
 export const recipientStatusEnum = pgEnum("recipient_status", [
@@ -71,7 +73,7 @@ export const sendConfigs = pgTable(
   })
 );
 
-// Email batches table
+// Batches table
 export const batches = pgTable(
   "batches",
   {
@@ -83,11 +85,21 @@ export const batches = pgTable(
       onDelete: "set null",
     }),
     name: varchar("name", { length: 255 }).notNull(),
+
+    // GENERIC: Module-specific payload (new)
+    // Email: { subject, htmlContent, textContent, fromEmail?, fromName? }
+    // SMS: { message, fromNumber? }
+    // Push: { title, body, data, icon? }
+    // Webhook: { body, method?, headers? }
+    payload: jsonb("payload").$type<BatchPayload>(),
+
+    // LEGACY: Email-specific fields (kept for backwards compatibility)
     subject: varchar("subject", { length: 500 }),
     fromEmail: varchar("from_email", { length: 255 }),
     fromName: varchar("from_name", { length: 255 }),
     htmlContent: text("html_content"),
     textContent: text("text_content"),
+
     status: batchStatusEnum("status").default("draft").notNull(),
     totalRecipients: integer("total_recipients").default(0).notNull(),
     sentCount: integer("sent_count").default(0).notNull(),
@@ -116,7 +128,13 @@ export const recipients = pgTable(
     batchId: uuid("batch_id")
       .notNull()
       .references(() => batches.id, { onDelete: "cascade" }),
-    email: varchar("email", { length: 255 }).notNull(),
+
+    // GENERIC: Works for any channel (email, phone, device token, URL)
+    identifier: varchar("identifier", { length: 500 }),
+
+    // LEGACY: Email-specific field (kept for backwards compatibility)
+    email: varchar("email", { length: 255 }),
+
     name: varchar("name", { length: 255 }),
     variables: jsonb("variables").$type<Record<string, string>>(),
     status: recipientStatusEnum("status").default("pending").notNull(),
@@ -222,7 +240,54 @@ export type WebhookModuleConfig = {
   successStatusCodes?: number[];
 };
 
-export type SendConfigData = EmailModuleConfig | WebhookModuleConfig;
+export type SmsModuleConfig = {
+  provider: "twilio" | "aws-sns";
+  accountSid?: string;
+  authToken?: string;
+  apiKey?: string;
+  region?: string;
+  fromNumber?: string;
+};
+
+export type PushModuleConfig = {
+  provider: "fcm" | "apns";
+  apiKey?: string;
+  projectId?: string;
+  credentials?: string;
+  appId?: string;
+};
+
+export type SendConfigData = EmailModuleConfig | WebhookModuleConfig | SmsModuleConfig | PushModuleConfig;
+
+// Batch payload types (module-specific content)
+export type EmailBatchPayload = {
+  subject: string;
+  htmlContent?: string;
+  textContent?: string;
+  fromEmail?: string;
+  fromName?: string;
+};
+
+export type SmsBatchPayload = {
+  message: string;
+  fromNumber?: string;
+};
+
+export type PushBatchPayload = {
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+  icon?: string;
+  badge?: number;
+};
+
+export type WebhookBatchPayload = {
+  body: Record<string, unknown>;
+  method?: "POST" | "PUT" | "PATCH";
+  headers?: Record<string, string>;
+};
+
+export type BatchPayload = EmailBatchPayload | SmsBatchPayload | PushBatchPayload | WebhookBatchPayload;
 
 export type RateLimitConfig = {
   perSecond?: number;

@@ -1,7 +1,7 @@
 import { ConsumerMessages, JsMsg, StringCodec } from "nats";
 import { eq, and, sql } from "drizzle-orm";
 import { batches, recipients, sendConfigs } from "@batchsender/db";
-import type { SendConfig, EmailModuleConfig } from "@batchsender/db";
+import type { SendConfig, EmailModuleConfig, BatchPayload, EmailBatchPayload } from "@batchsender/db";
 import { db } from "../db.js";
 import { config } from "../config.js";
 import { logEmailEvent, indexProviderMessage, logEmailEvents } from "../clickhouse.js";
@@ -64,6 +64,88 @@ export class NatsEmailWorker {
     maxDelayMs: number = 30000
   ): number {
     return Math.min(baseDelayMs * Math.pow(2, redeliveryCount), maxDelayMs);
+  }
+
+  /**
+   * Build merged job payload following resolution logic:
+   * 1. Start with send config defaults (credentials + defaults)
+   * 2. Apply batch payload (content + overrides)
+   * 3. Apply legacy fields (for backwards compatibility)
+   * 4. Add recipient info
+   */
+  private buildMergedPayload(params: {
+    sendConfig: EmbeddedSendConfig;
+    batchPayload?: BatchPayload;
+    legacyFields: {
+      fromEmail?: string;
+      fromName?: string;
+      subject?: string;
+      htmlContent?: string;
+      textContent?: string;
+    };
+    recipient: {
+      identifier: string;
+      name?: string;
+      variables?: Record<string, string>;
+    };
+    webhookData?: Record<string, unknown>;
+  }): JobPayload {
+    const { sendConfig, batchPayload, legacyFields, recipient, webhookData } = params;
+    const configData = sendConfig.config;
+
+    // Start with recipient info
+    const payload: JobPayload = {
+      to: recipient.identifier,
+      name: recipient.name,
+      variables: recipient.variables,
+    };
+
+    // Handle based on module type
+    switch (sendConfig.module) {
+      case "email": {
+        // Get email config defaults
+        const emailConfig = configData as EmailModuleConfig;
+        const emailPayload = batchPayload as EmailBatchPayload | undefined;
+
+        // Resolution: payload overrides config defaults, legacy fields as fallback
+        payload.fromEmail = emailPayload?.fromEmail || legacyFields.fromEmail || emailConfig.fromEmail;
+        payload.fromName = emailPayload?.fromName || legacyFields.fromName || emailConfig.fromName;
+        payload.subject = emailPayload?.subject || legacyFields.subject;
+        payload.htmlContent = emailPayload?.htmlContent || legacyFields.htmlContent;
+        payload.textContent = emailPayload?.textContent || legacyFields.textContent;
+        break;
+      }
+
+      case "sms": {
+        // Get SMS config defaults
+        const smsConfig = configData as { fromNumber?: string };
+        const smsPayload = batchPayload as { message?: string; fromNumber?: string } | undefined;
+
+        payload.subject = smsPayload?.message; // Reuse subject field for message
+        payload.fromEmail = smsPayload?.fromNumber || smsConfig.fromNumber; // Reuse fromEmail for fromNumber
+        break;
+      }
+
+      case "push": {
+        // Push notification payload
+        const pushPayload = batchPayload as { title?: string; body?: string; data?: Record<string, unknown> } | undefined;
+
+        payload.subject = pushPayload?.title;
+        payload.textContent = pushPayload?.body;
+        payload.data = pushPayload?.data;
+        break;
+      }
+
+      case "webhook": {
+        // Webhook payload
+        const webhookPayload = batchPayload as { body?: Record<string, unknown>; method?: string; headers?: Record<string, string> } | undefined;
+
+        payload.data = webhookPayload?.body || webhookData;
+        break;
+      }
+    }
+
+    return payload;
   }
 
   // Generic consumer processor - reduces code duplication
@@ -223,27 +305,32 @@ export class NatsEmailWorker {
       );
 
     // Log queued events to ClickHouse in bulk
-    const queuedEvents = pendingRecipients.map((r: { id: string; email: string }) => ({
+    const queuedEvents = pendingRecipients.map((r: { id: string; email: string | null; identifier: string | null }) => ({
       event_type: "queued" as const,
       module_type: embeddedConfig.module,
       batch_id: batchId,
       recipient_id: r.id,
       user_id: userId,
-      email: r.email,
+      email: r.identifier || r.email || "",
     }));
 
     await logEmailEvents(queuedEvents);
 
     // Create jobs with embedded send config
-    const jobs: JobData[] = pendingRecipients.map((r: { id: string; email: string; name: string | null; variables: Record<string, string> | null }) => ({
+    const jobs: JobData[] = pendingRecipients.map((r: { id: string; email: string | null; identifier: string | null; name: string | null; variables: Record<string, string> | null }) => ({
       batchId,
       recipientId: r.id,
       userId,
-      email: r.email,
+      // GENERIC: Use identifier, fallback to email for backwards compat
+      identifier: r.identifier || r.email || "",
+      // LEGACY: Keep email field for backwards compat
+      email: r.email || r.identifier || undefined,
       name: r.name || undefined,
       variables: r.variables as Record<string, string> | undefined,
       sendConfig: embeddedConfig,
-      // Email-specific fields (used by email module)
+      // GENERIC: Include payload if present
+      payload: batch.payload as BatchPayload | undefined,
+      // LEGACY: Email-specific fields (used by email module if no payload)
       fromEmail: batch.fromEmail || undefined,
       fromName: batch.fromName || undefined,
       subject: batch.subject || undefined,
@@ -314,10 +401,12 @@ export class NatsEmailWorker {
       batchId,
       recipientId,
       userId,
+      identifier,
       email,
       name,
       variables,
       sendConfig,
+      payload: batchPayload,
       fromEmail,
       fromName,
       subject,
@@ -332,18 +421,14 @@ export class NatsEmailWorker {
       throw new Error(`Unknown module type: ${sendConfig.module}`);
     }
 
-    // Build job payload for the module
-    const payload: JobPayload = {
-      to: email,
-      name: name || undefined,
-      variables,
-      fromEmail,
-      fromName,
-      subject,
-      htmlContent,
-      textContent,
-      data: webhookData,
-    };
+    // Build merged job payload: config defaults → batch payload → legacy fields
+    const jobPayload: JobPayload = this.buildMergedPayload({
+      sendConfig,
+      batchPayload,
+      legacyFields: { fromEmail, fromName, subject, htmlContent, textContent },
+      recipient: { identifier: identifier || email || "", name, variables },
+      webhookData,
+    });
 
     // Apply rate limiting based on send config
     const rateLimit = sendConfig.rateLimit?.perSecond || 100;
@@ -370,7 +455,7 @@ export class NatsEmailWorker {
       updatedAt: new Date(),
     };
 
-    const result: JobResult = await module.execute(payload, configForModule);
+    const result: JobResult = await module.execute(jobPayload, configForModule);
 
     if (!result.success) {
       throw new Error(result.error || `Failed to execute ${sendConfig.module} module`);
@@ -399,13 +484,14 @@ export class NatsEmailWorker {
       .where(eq(batches.id, batchId));
 
     // Log to ClickHouse
+    const recipientIdentifier = identifier || email || "";
     await logEmailEvent({
       event_type: "sent",
       module_type: sendConfig.module,
       batch_id: batchId,
       recipient_id: recipientId,
       user_id: userId,
-      email,
+      email: recipientIdentifier,
       provider_message_id: providerMessageId,
     });
 
@@ -419,7 +505,7 @@ export class NatsEmailWorker {
       });
     }
 
-    log.email.debug({ batchId, to: email, module: sendConfig.module }, "sent");
+    log.email.debug({ batchId, to: recipientIdentifier, module: sendConfig.module }, "sent");
 
     // Check if batch is complete
     await this.checkBatchCompletion(batchId);
@@ -442,7 +528,8 @@ export class NatsEmailWorker {
       return;
     }
 
-    const { batchId, recipientId, userId, email, sendConfig } = data;
+    const { batchId, recipientId, userId, identifier, email, sendConfig } = data;
+    const recipientIdentifier = identifier || email || "";
 
     // Check if this is the final attempt
     const isFinalAttempt = msg.info.redeliveryCount >= 4; // 5 total attempts
@@ -474,12 +561,12 @@ export class NatsEmailWorker {
         batch_id: batchId,
         recipient_id: recipientId,
         user_id: userId,
-        email,
+        email: recipientIdentifier,
         error_message: error.message,
       });
 
       log.email.error(
-        { batchId, recipientId, email, module: sendConfig.module, error: error.message },
+        { batchId, recipientId, identifier: recipientIdentifier, module: sendConfig.module, error: error.message },
         "permanently failed"
       );
 
@@ -492,7 +579,7 @@ export class NatsEmailWorker {
       // Retry with exponential backoff
       const delay = Math.min(1000 * Math.pow(2, msg.info.redeliveryCount), 30000);
       log.email.warn(
-        { batchId, recipientId, email, attempt: msg.info.redeliveryCount + 1, delay },
+        { batchId, recipientId, identifier: recipientIdentifier, attempt: msg.info.redeliveryCount + 1, delay },
         "retrying"
       );
       msg.nak(delay);

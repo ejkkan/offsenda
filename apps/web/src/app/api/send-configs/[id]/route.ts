@@ -5,7 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sendConfigs } from "@batchsender/db";
-import type { EmailModuleConfig, WebhookModuleConfig } from "@batchsender/db";
+import type { SendConfigData } from "@batchsender/db";
 
 // Validation schemas
 const emailConfigSchema = z.object({
@@ -26,6 +26,23 @@ const webhookConfigSchema = z.object({
   successStatusCodes: z.array(z.number()).optional(),
 });
 
+const smsConfigSchema = z.object({
+  provider: z.enum(["twilio", "aws-sns"]),
+  accountSid: z.string().optional(),
+  authToken: z.string().optional(),
+  apiKey: z.string().optional(),
+  region: z.string().optional(),
+  fromNumber: z.string().optional(),
+});
+
+const pushConfigSchema = z.object({
+  provider: z.enum(["fcm", "apns"]),
+  apiKey: z.string().optional(),
+  projectId: z.string().optional(),
+  credentials: z.string().optional(),
+  appId: z.string().optional(),
+});
+
 const rateLimitSchema = z.object({
   perSecond: z.number().min(1).max(500).optional(),
   perMinute: z.number().optional(),
@@ -34,18 +51,28 @@ const rateLimitSchema = z.object({
 
 const updateSendConfigSchema = z.object({
   name: z.string().min(1).max(255).optional(),
-  config: z.union([emailConfigSchema, webhookConfigSchema]).optional(),
+  config: z.union([emailConfigSchema, webhookConfigSchema, smsConfigSchema, pushConfigSchema]).optional(),
   rateLimit: rateLimitSchema,
   isDefault: z.boolean().optional(),
   isActive: z.boolean().optional(),
 });
 
-// Mask sensitive fields in config
-function maskSensitiveConfig(config: EmailModuleConfig | WebhookModuleConfig): Record<string, unknown> {
+// Mask sensitive fields in config (works for all module types)
+function maskSensitiveConfig(config: SendConfigData): Record<string, unknown> {
   const masked = { ...config } as Record<string, unknown>;
+  // Mask API keys
   if ("apiKey" in masked && masked.apiKey) {
     const key = masked.apiKey as string;
     masked.apiKey = key.slice(0, 8) + "..." + key.slice(-4);
+  }
+  // Mask auth tokens (for Twilio)
+  if ("authToken" in masked && masked.authToken) {
+    const token = masked.authToken as string;
+    masked.authToken = token.slice(0, 4) + "..." + token.slice(-4);
+  }
+  // Mask credentials (for FCM/APNS)
+  if ("credentials" in masked && masked.credentials) {
+    masked.credentials = "***masked***";
   }
   return masked;
 }

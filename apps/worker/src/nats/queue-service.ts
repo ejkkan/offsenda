@@ -1,5 +1,5 @@
 import { JetStreamClient, StringCodec } from "nats";
-import type { SendConfig, SendConfigData, RateLimitConfig, ModuleType } from "@batchsender/db";
+import type { SendConfig, SendConfigData, RateLimitConfig, ModuleType, BatchPayload } from "@batchsender/db";
 import { NatsClient } from "./client.js";
 import { log, createTimer } from "../logger.js";
 
@@ -23,12 +23,17 @@ export interface JobData {
   batchId: string;
   recipientId: string;
   userId: string;
-  email: string;
+  // GENERIC: Works for any channel (email, phone, device token, URL)
+  identifier: string;
+  // LEGACY: Email address (for backwards compatibility)
+  email?: string;
   name?: string;
   variables?: Record<string, string>;
   // Embedded send config (no DB lookup needed during processing)
   sendConfig: EmbeddedSendConfig;
-  // Email-specific fields (for email module)
+  // GENERIC: Module-specific payload (new)
+  payload?: BatchPayload;
+  // LEGACY: Email-specific fields (for backwards compatibility)
   fromEmail?: string;
   fromName?: string;
   subject?: string;
