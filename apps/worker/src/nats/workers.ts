@@ -1,33 +1,50 @@
 import { ConsumerMessages, JsMsg, StringCodec } from "nats";
 import { eq, and, sql } from "drizzle-orm";
-import { batches, recipients } from "@batchsender/db";
+import { batches, recipients, sendConfigs } from "@batchsender/db";
+import type { SendConfig, EmailModuleConfig } from "@batchsender/db";
 import { db } from "../db.js";
 import { config } from "../config.js";
 import { logEmailEvent, indexProviderMessage, logEmailEvents } from "../clickhouse.js";
-import { BatchJobData, EmailJobData, NatsQueueService } from "./queue-service.js";
+import { BatchJobData, JobData, EmbeddedSendConfig, NatsQueueService } from "./queue-service.js";
 import { NatsClient } from "./client.js";
-import { getEmailProvider } from "../providers/index.js";
+import { getModule } from "../modules/index.js";
+import type { JobPayload, JobResult } from "../modules/types.js";
 import { log, createTimer } from "../logger.js";
 import { ProviderRateLimiter } from "../provider-rate-limiter.js";
 
-// Get configured email provider (Resend, SES, or Mock)
-const emailProvider = getEmailProvider();
+// Provider rate limiters keyed by config ID
+// Lazily created when first needed for a specific config
+const rateLimiters = new Map<string, ProviderRateLimiter>();
 
-// Initialize provider-specific rate limiter (only if not disabled)
-// In test environments, DISABLE_RATE_LIMIT=true to avoid Redis connection
-let providerRateLimiter: ProviderRateLimiter | null = null;
+// Get or create a rate limiter for a specific send config
+function getRateLimiter(configId: string, tokensPerSecond: number): ProviderRateLimiter | null {
+  if (config.DISABLE_RATE_LIMIT) {
+    return null;
+  }
 
-if (!config.DISABLE_RATE_LIMIT) {
-  const providerRateLimitConfig = {
-    ses: { provider: "ses", tokensPerSecond: config.SES_RATE_LIMIT },
-    resend: { provider: "resend", tokensPerSecond: config.RESEND_RATE_LIMIT },
-    mock: { provider: "mock", tokensPerSecond: config.MOCK_RATE_LIMIT },
+  let limiter = rateLimiters.get(configId);
+  if (!limiter) {
+    limiter = new ProviderRateLimiter({
+      provider: configId,
+      tokensPerSecond,
+    });
+    rateLimiters.set(configId, limiter);
+  }
+  return limiter;
+}
+
+// Default send config for backwards compatibility (batches without sendConfigId)
+function getDefaultEmailConfig(): EmbeddedSendConfig {
+  return {
+    id: "default",
+    module: "email",
+    config: {
+      mode: "managed",
+    } as EmailModuleConfig,
+    rateLimit: {
+      perSecond: 100, // Default rate limit
+    },
   };
-
-  const rateLimiterConfig = providerRateLimitConfig[emailProvider.name as keyof typeof providerRateLimitConfig]
-    || { provider: emailProvider.name, tokensPerSecond: 100 };
-
-  providerRateLimiter = new ProviderRateLimiter(rateLimiterConfig);
 }
 
 export class NatsEmailWorker {
@@ -120,8 +137,12 @@ export class NatsEmailWorker {
 
     log.batch.info({ id: batchId, userId }, "processing");
 
+    // Fetch batch with send config relation
     const batch = await db.query.batches.findFirst({
       where: eq(batches.id, batchId),
+      with: {
+        sendConfig: true,
+      },
     });
 
     if (!batch) {
@@ -132,6 +153,20 @@ export class NatsEmailWorker {
     if (batch.status === "paused") {
       log.batch.info({ id: batchId }, "skipped (paused)");
       return;
+    }
+
+    // Build embedded send config (embed to avoid DB lookups during processing)
+    let embeddedConfig: EmbeddedSendConfig;
+    if (batch.sendConfig) {
+      embeddedConfig = {
+        id: batch.sendConfig.id,
+        module: batch.sendConfig.module,
+        config: batch.sendConfig.config,
+        rateLimit: batch.sendConfig.rateLimit,
+      };
+    } else {
+      // Backwards compatibility: use default managed email config
+      embeddedConfig = getDefaultEmailConfig();
     }
 
     // Update to processing
@@ -190,6 +225,7 @@ export class NatsEmailWorker {
     // Log queued events to ClickHouse in bulk
     const queuedEvents = pendingRecipients.map((r: { id: string; email: string }) => ({
       event_type: "queued" as const,
+      module_type: embeddedConfig.module,
       batch_id: batchId,
       recipient_id: r.id,
       user_id: userId,
@@ -198,28 +234,30 @@ export class NatsEmailWorker {
 
     await logEmailEvents(queuedEvents);
 
-    // Create email jobs
-    const emailJobs: EmailJobData[] = pendingRecipients.map((r: { id: string; email: string; name: string | null; variables: Record<string, string> | null }) => ({
+    // Create jobs with embedded send config
+    const jobs: JobData[] = pendingRecipients.map((r: { id: string; email: string; name: string | null; variables: Record<string, string> | null }) => ({
       batchId,
       recipientId: r.id,
       userId,
       email: r.email,
       name: r.name || undefined,
       variables: r.variables as Record<string, string> | undefined,
-      fromEmail: batch.fromEmail,
+      sendConfig: embeddedConfig,
+      // Email-specific fields (used by email module)
+      fromEmail: batch.fromEmail || undefined,
       fromName: batch.fromName || undefined,
-      subject: batch.subject,
+      subject: batch.subject || undefined,
       htmlContent: batch.htmlContent || undefined,
       textContent: batch.textContent || undefined,
     }));
 
-    // Enqueue emails to NATS
-    await this.queueService.enqueueEmails(userId, emailJobs);
+    // Enqueue jobs to NATS
+    await this.queueService.enqueueEmails(userId, jobs);
 
     // Ensure a consumer exists for this user
     await this.ensureUserEmailProcessor(userId);
 
-    log.batch.info({ id: batchId, emails: emailJobs.length, duration: timer() }, "enqueued");
+    log.batch.info({ id: batchId, jobs: jobs.length, module: embeddedConfig.module, duration: timer() }, "enqueued");
   }
 
   // Create or get email consumer for a specific user
@@ -260,14 +298,14 @@ export class NatsEmailWorker {
     }
   }
 
-  // Process a single email message
-  private async processEmailMessage(msg: JsMsg): Promise<void> {
+  // Process a single job message (email, webhook, etc.)
+  private async processJobMessage(msg: JsMsg): Promise<void> {
     // Parse message data with error handling
-    let data: EmailJobData;
+    let data: JobData;
     try {
-      data = JSON.parse(this.sc.decode(msg.data)) as EmailJobData;
+      data = JSON.parse(this.sc.decode(msg.data)) as JobData;
     } catch (error) {
-      log.email.error({ error, seq: msg.seq }, "Failed to parse email message");
+      log.email.error({ error, seq: msg.seq }, "Failed to parse job message");
       msg.ack(); // Acknowledge malformed message to prevent redelivery
       return;
     }
@@ -279,48 +317,63 @@ export class NatsEmailWorker {
       email,
       name,
       variables,
+      sendConfig,
       fromEmail,
       fromName,
       subject,
       htmlContent,
       textContent,
+      data: webhookData,
     } = data;
 
-    // Template variable replacement
-    let html = htmlContent || "";
-    let text = textContent || "";
-
-    if (variables) {
-      for (const [key, value] of Object.entries(variables)) {
-        html = html.replace(new RegExp(`{{${key}}}`, "g"), value);
-        text = text.replace(new RegExp(`{{${key}}}`, "g"), value);
-      }
+    // Get the appropriate module
+    const module = getModule(sendConfig.module);
+    if (!module) {
+      throw new Error(`Unknown module type: ${sendConfig.module}`);
     }
 
-    html = html.replace(/{{name}}/g, name || "").replace(/{{email}}/g, email);
-    text = text.replace(/{{name}}/g, name || "").replace(/{{email}}/g, email);
-
-    // Acquire rate limit token before sending (respects provider limits like AWS SES 14/sec)
-    // Rate limiting is disabled in test environments (providerRateLimiter will be null)
-    if (providerRateLimiter) {
-      const acquired = await providerRateLimiter.acquire(10000); // 10 second timeout
-      if (!acquired) {
-        throw new Error(`Provider rate limit timeout - could not send within 10 seconds`);
-      }
-    }
-
-    // Send via configured email provider
-    const result = await emailProvider.send({
+    // Build job payload for the module
+    const payload: JobPayload = {
       to: email,
-      from: fromEmail,
+      name: name || undefined,
+      variables,
+      fromEmail,
       fromName,
       subject,
-      html: html || undefined,
-      text: text || " ",
-    });
+      htmlContent,
+      textContent,
+      data: webhookData,
+    };
+
+    // Apply rate limiting based on send config
+    const rateLimit = sendConfig.rateLimit?.perSecond || 100;
+    const rateLimiter = getRateLimiter(sendConfig.id, rateLimit);
+    if (rateLimiter) {
+      const acquired = await rateLimiter.acquire(10000); // 10 second timeout
+      if (!acquired) {
+        throw new Error(`Rate limit timeout - could not process within 10 seconds`);
+      }
+    }
+
+    // Execute via module system
+    // Build a SendConfig-like object for the module
+    const configForModule = {
+      id: sendConfig.id,
+      userId,
+      name: "embedded",
+      module: sendConfig.module,
+      config: sendConfig.config,
+      rateLimit: sendConfig.rateLimit ?? null,
+      isDefault: false,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result: JobResult = await module.execute(payload, configForModule);
 
     if (!result.success) {
-      throw new Error(result.error || "Failed to send email");
+      throw new Error(result.error || `Failed to execute ${sendConfig.module} module`);
     }
 
     const providerMessageId = result.providerMessageId || "";
@@ -348,6 +401,7 @@ export class NatsEmailWorker {
     // Log to ClickHouse
     await logEmailEvent({
       event_type: "sent",
+      module_type: sendConfig.module,
       batch_id: batchId,
       recipient_id: recipientId,
       user_id: userId,
@@ -355,33 +409,40 @@ export class NatsEmailWorker {
       provider_message_id: providerMessageId,
     });
 
-    // Index message ID for webhook lookups
-    await indexProviderMessage({
-      provider_message_id: providerMessageId,
-      batch_id: batchId,
-      recipient_id: recipientId,
-      user_id: userId,
-    });
+    // Index message ID for webhook lookups (for email module)
+    if (providerMessageId && sendConfig.module === "email") {
+      await indexProviderMessage({
+        provider_message_id: providerMessageId,
+        batch_id: batchId,
+        recipient_id: recipientId,
+        user_id: userId,
+      });
+    }
 
-    log.email.debug({ batchId, to: email }, "sent");
+    log.email.debug({ batchId, to: email, module: sendConfig.module }, "sent");
 
     // Check if batch is complete
     await this.checkBatchCompletion(batchId);
   }
 
-  // Handle email sending failures
+  // Legacy alias for backwards compatibility
+  private async processEmailMessage(msg: JsMsg): Promise<void> {
+    return this.processJobMessage(msg);
+  }
+
+  // Handle job failures
   private async handleEmailFailure(msg: JsMsg, error: Error): Promise<void> {
     // Parse message data with error handling
-    let data: EmailJobData;
+    let data: JobData;
     try {
-      data = JSON.parse(this.sc.decode(msg.data)) as EmailJobData;
+      data = JSON.parse(this.sc.decode(msg.data)) as JobData;
     } catch (parseError) {
-      log.email.error({ error: parseError, seq: msg.seq }, "Failed to parse email message in error handler");
+      log.email.error({ error: parseError, seq: msg.seq }, "Failed to parse job message in error handler");
       msg.ack(); // Acknowledge malformed message
       return;
     }
 
-    const { batchId, recipientId, userId, email } = data;
+    const { batchId, recipientId, userId, email, sendConfig } = data;
 
     // Check if this is the final attempt
     const isFinalAttempt = msg.info.redeliveryCount >= 4; // 5 total attempts
@@ -409,6 +470,7 @@ export class NatsEmailWorker {
       // Log to ClickHouse
       await logEmailEvent({
         event_type: "failed",
+        module_type: sendConfig.module,
         batch_id: batchId,
         recipient_id: recipientId,
         user_id: userId,
@@ -417,7 +479,7 @@ export class NatsEmailWorker {
       });
 
       log.email.error(
-        { batchId, recipientId, email, error: error.message },
+        { batchId, recipientId, email, module: sendConfig.module, error: error.message },
         "permanently failed"
       );
 
@@ -528,10 +590,11 @@ export class NatsEmailWorker {
     // Wait for in-flight messages to complete
     await new Promise((resolve) => setTimeout(resolve, 5000));
 
-    // Close provider rate limiter (if it was initialized)
-    if (providerRateLimiter) {
-      await providerRateLimiter.close();
+    // Close all rate limiters
+    for (const limiter of rateLimiters.values()) {
+      await limiter.close();
     }
+    rateLimiters.clear();
 
     this.activeConsumers.clear();
     log.system.info("NATS workers shutdown complete");

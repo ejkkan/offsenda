@@ -11,6 +11,7 @@ export function Nav() {
     { href: "/dashboard", label: "Dashboard" },
     { href: "/batches", label: "Batches" },
     { href: "/batches/new", label: "New Batch" },
+    { href: "/settings/send-configs", label: "Settings" },
   ];
 
   return (

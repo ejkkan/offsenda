@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/ejkkan/batchsender
+    repoURL: https://github.com/ejkkan/offsenda
     targetRevision: main
     path: k8s/monitoring
   destination:

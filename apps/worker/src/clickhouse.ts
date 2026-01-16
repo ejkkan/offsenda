@@ -8,7 +8,7 @@ export const clickhouse = createClient({
   database: config.CLICKHOUSE_DATABASE,
 });
 
-export type EmailEventType =
+export type EventType =
   | "queued"
   | "sent"
   | "delivered"
@@ -19,8 +19,14 @@ export type EmailEventType =
   | "complained"
   | "failed";
 
+export type ModuleType = "email" | "webhook";
+
+// Legacy alias
+export type EmailEventType = EventType;
+
 export interface EmailEvent {
-  event_type: EmailEventType;
+  event_type: EventType;
+  module_type?: ModuleType;
   batch_id: string;
   recipient_id: string;
   user_id: string;
@@ -37,6 +43,7 @@ export async function logEmailEvent(event: EmailEvent): Promise<void> {
       values: [
         {
           event_type: event.event_type,
+          module_type: event.module_type || "email",
           batch_id: event.batch_id,
           recipient_id: event.recipient_id,
           user_id: event.user_id,
@@ -60,6 +67,7 @@ export async function logEmailEvents(events: EmailEvent[]): Promise<void> {
   try {
     const values = events.map((event) => ({
       event_type: event.event_type,
+      module_type: event.module_type || "email",
       batch_id: event.batch_id,
       recipient_id: event.recipient_id,
       user_id: event.user_id,

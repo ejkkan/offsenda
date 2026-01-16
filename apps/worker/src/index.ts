@@ -14,6 +14,9 @@ import { NatsClient } from "./nats/client.js";
 import { NatsQueueService } from "./nats/queue-service.js";
 import { NatsEmailWorker } from "./nats/workers.js";
 
+// Services
+import { SchedulerService } from "./services/scheduler.js";
+
 const app = Fastify({
   logger: false,  // We use our own structured logger
 });
@@ -113,6 +116,7 @@ export let natsClient: NatsClient;
 export let queueService: NatsQueueService;
 export let rateLimiterService: RateLimiterService;
 let worker: NatsEmailWorker;
+let scheduler: SchedulerService;
 
 // Register routes
 await registerWebhooks(app);
@@ -213,6 +217,11 @@ try {
   // Start existing user workers
   await worker.startExistingUserWorkers();
 
+  // Start scheduler for scheduled batches
+  scheduler = new SchedulerService(queueService);
+  scheduler.start();
+  log.system.info({}, "scheduler started");
+
   // Sync any queued batches from DB to NATS on startup
   await syncQueuedBatchesToQueue();
 
@@ -261,6 +270,9 @@ try {
 // Graceful shutdown
 async function shutdown() {
   log.system.info({}, "shutting down");
+
+  // Stop scheduler
+  scheduler.stop();
 
   // Stop accepting new work
   await worker.shutdown();

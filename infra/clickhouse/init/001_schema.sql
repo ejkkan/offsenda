@@ -1,4 +1,4 @@
--- Email events table for analytics
+-- Events table for analytics (email, webhook, etc.)
 -- Uses ReplacingMergeTree to auto-deduplicate duplicate webhooks from SNS
 -- Deduplication: (batch_id, recipient_id, event_type) - one event type per recipient per batch
 CREATE TABLE IF NOT EXISTS email_events
@@ -15,6 +15,10 @@ CREATE TABLE IF NOT EXISTS email_events
         'complained' = 7,
         'failed' = 8
     ),
+    module_type Enum8(
+        'email' = 1,
+        'webhook' = 2
+    ) DEFAULT 'email',
     batch_id UUID,
     recipient_id UUID,
     user_id UUID,
@@ -28,7 +32,8 @@ CREATE TABLE IF NOT EXISTS email_events
     event_date Date DEFAULT toDate(created_at),
 
     -- Index for user queries (dashboard, analytics)
-    INDEX idx_user_id user_id TYPE bloom_filter GRANULARITY 4
+    INDEX idx_user_id user_id TYPE bloom_filter GRANULARITY 4,
+    INDEX idx_module_type module_type TYPE set(2) GRANULARITY 4
 )
 ENGINE = ReplacingMergeTree(created_at)
 PARTITION BY toYYYYMM(event_date)

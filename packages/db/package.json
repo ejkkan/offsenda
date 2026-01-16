@@ -16,9 +16,12 @@
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "db:push": "drizzle-kit push:pg",
+    "db:push:local": "DATABASE_URL='postgresql://batchsender:batchsender@localhost:5455/batchsender' drizzle-kit push:pg",
+    "db:push:remote": "bash -c 'set -a && source ../../apps/web/.env.remote && drizzle-kit push:pg'",
     "db:migrate": "drizzle-kit migrate",
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
+    "db:studio:local": "DATABASE_URL='postgresql://batchsender:batchsender@localhost:5455/batchsender' drizzle-kit studio",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

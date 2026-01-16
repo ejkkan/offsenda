@@ -1,4 +1,5 @@
 import { JetStreamClient, StringCodec } from "nats";
+import type { SendConfig, SendConfigData, RateLimitConfig, ModuleType } from "@batchsender/db";
 import { NatsClient } from "./client.js";
 import { log, createTimer } from "../logger.js";
 
@@ -8,19 +9,37 @@ export interface BatchJobData {
   userId: string;
 }
 
-export interface EmailJobData {
+/**
+ * Embedded send config - included in job messages to avoid DB lookups during processing
+ */
+export interface EmbeddedSendConfig {
+  id: string;
+  module: ModuleType;
+  config: SendConfigData;
+  rateLimit?: RateLimitConfig | null;
+}
+
+export interface JobData {
   batchId: string;
   recipientId: string;
   userId: string;
   email: string;
   name?: string;
   variables?: Record<string, string>;
-  fromEmail: string;
+  // Embedded send config (no DB lookup needed during processing)
+  sendConfig: EmbeddedSendConfig;
+  // Email-specific fields (for email module)
+  fromEmail?: string;
   fromName?: string;
-  subject: string;
+  subject?: string;
   htmlContent?: string;
   textContent?: string;
+  // Webhook-specific fields (for webhook module)
+  data?: Record<string, unknown>;
 }
+
+// Legacy alias for backwards compatibility
+export type EmailJobData = JobData;
 
 export interface QueueStats {
   pending: number;

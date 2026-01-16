@@ -79,9 +79,12 @@ export const batches = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    sendConfigId: uuid("send_config_id").references(() => sendConfigs.id, {
+      onDelete: "set null",
+    }),
     name: varchar("name", { length: 255 }).notNull(),
-    subject: varchar("subject", { length: 500 }).notNull(),
-    fromEmail: varchar("from_email", { length: 255 }).notNull(),
+    subject: varchar("subject", { length: 500 }),
+    fromEmail: varchar("from_email", { length: 255 }),
     fromName: varchar("from_name", { length: 255 }),
     htmlContent: text("html_content"),
     textContent: text("text_content"),
@@ -100,6 +103,8 @@ export const batches = pgTable(
   (table) => ({
     userIdIdx: index("batches_user_id_idx").on(table.userId),
     statusIdx: index("batches_status_idx").on(table.status),
+    scheduledIdx: index("batches_scheduled_idx").on(table.status, table.scheduledAt),
+    sendConfigIdx: index("batches_send_config_idx").on(table.sendConfigId),
   })
 );
 
@@ -161,12 +166,25 @@ export const apiKeys = pgTable(
 export const usersRelations = relations(users, ({ many }) => ({
   batches: many(batches),
   apiKeys: many(apiKeys),
+  sendConfigs: many(sendConfigs),
+}));
+
+export const sendConfigsRelations = relations(sendConfigs, ({ one, many }) => ({
+  user: one(users, {
+    fields: [sendConfigs.userId],
+    references: [users.id],
+  }),
+  batches: many(batches),
 }));
 
 export const batchesRelations = relations(batches, ({ one, many }) => ({
   user: one(users, {
     fields: [batches.userId],
     references: [users.id],
+  }),
+  sendConfig: one(sendConfigs, {
+    fields: [batches.sendConfigId],
+    references: [sendConfigs.id],
   }),
   recipients: many(recipients),
 }));
@@ -185,6 +203,33 @@ export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
   }),
 }));
 
+// Config type definitions for send_configs
+export type EmailModuleConfig = {
+  mode: "managed" | "byok";
+  provider?: "resend" | "ses";
+  apiKey?: string;
+  region?: string;
+  fromEmail?: string;
+  fromName?: string;
+};
+
+export type WebhookModuleConfig = {
+  url: string;
+  method?: "POST" | "PUT";
+  headers?: Record<string, string>;
+  timeout?: number;
+  retries?: number;
+  successStatusCodes?: number[];
+};
+
+export type SendConfigData = EmailModuleConfig | WebhookModuleConfig;
+
+export type RateLimitConfig = {
+  perSecond?: number;
+  perMinute?: number;
+  dailyLimit?: number;
+};
+
 // Types
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -194,6 +239,9 @@ export type Recipient = typeof recipients.$inferSelect;
 export type NewRecipient = typeof recipients.$inferInsert;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type NewApiKey = typeof apiKeys.$inferInsert;
+export type SendConfig = typeof sendConfigs.$inferSelect;
+export type NewSendConfig = typeof sendConfigs.$inferInsert;
 
 export type BatchStatus = (typeof batchStatusEnum.enumValues)[number];
 export type RecipientStatus = (typeof recipientStatusEnum.enumValues)[number];
+export type ModuleType = (typeof moduleTypeEnum.enumValues)[number];
