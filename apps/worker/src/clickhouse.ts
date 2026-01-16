@@ -19,7 +19,7 @@ export type EventType =
   | "complained"
   | "failed";
 
-export type ModuleType = "email" | "webhook";
+export type ModuleType = "email" | "webhook" | "push" | "sms";
 
 // Legacy alias
 export type EmailEventType = EventType;
