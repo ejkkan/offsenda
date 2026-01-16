@@ -37,7 +37,7 @@ resources:
   - worker/deployment.yaml
   - worker/service.yaml
   - worker/ingress.yaml
-  # - external-secrets/github-secret-store.yaml
+  - external-secrets/github-secret-store.yaml
   # KEDA ScaledObject for instant autoscaling (replaces HPA)
   - worker/keda-scaledobject.yaml
   # worker/hpa.yaml - DISABLED: conflicts with KEDA (only use one or the other)

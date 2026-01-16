@@ -4,6 +4,33 @@
 #  BatchSender Kubernetes Development Server
 #############################################
 
+# ⚠️  DEPRECATION WARNING
+echo ""
+echo -e "\033[1;33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e "\033[1;33m  ⚠️  DEPRECATION WARNING\033[0m"
+echo -e "\033[1;33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo ""
+echo -e "  This script (\033[1mdev-k8s.sh\033[0m) is deprecated and will be removed on \033[1m2026-02-16\033[0m"
+echo ""
+echo -e "  \033[1;36m→ New command:\033[0m pnpm dev --mode=k8s"
+echo ""
+echo -e "  The new unified dev command provides:"
+echo -e "    • Automatic mode detection (K8s vs Docker)"
+echo -e "    • Service discovery dashboard"
+echo -e "    • Better error messages"
+echo -e "    • Integrated monitoring options"
+echo -e "    • Consistent command interface"
+echo ""
+echo -e "\033[1;33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo ""
+read -p "Continue with old script anyway? (y/N) " -n 1 -r
+echo ""
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Exiting. Please use: pnpm dev --mode=k8s"
+    exit 0
+fi
+echo ""
+
 set -e
 
 # Colors

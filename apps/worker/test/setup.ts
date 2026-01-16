@@ -151,6 +151,7 @@ async function startWorker(): Promise<void> {
   workerProcess = spawn("tsx", ["src/index.ts"], {
     env: {
       ...process.env,
+      // IMPORTANT: Always use mock email provider in tests
       EMAIL_PROVIDER: "mock",
       NODE_ENV: "test",
       PORT: WORKER_PORT,

@@ -1,6 +1,33 @@
 #!/bin/bash
 # Start local monitoring stack for batchsender
 
+# ⚠️  DEPRECATION WARNING
+echo ""
+echo -e "\033[1;33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e "\033[1;33m  ⚠️  DEPRECATION WARNING\033[0m"
+echo -e "\033[1;33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo ""
+echo -e "  This script (\033[1mstart-monitoring.sh\033[0m) is deprecated and will be removed on \033[1m2026-02-16\033[0m"
+echo ""
+echo -e "  \033[1;36m→ New command:\033[0m pnpm monitoring:start"
+echo ""
+echo -e "  The new monitoring commands provide:"
+echo -e "    • pnpm monitoring:start  - Start monitoring stack"
+echo -e "    • pnpm monitoring:stop   - Stop monitoring stack"
+echo -e "    • pnpm monitoring:open   - Open Grafana dashboard"
+echo -e "    • Better status messages"
+echo -e "    • Consistent command interface"
+echo ""
+echo -e "\033[1;33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo ""
+read -p "Continue with old script anyway? (y/N) " -n 1 -r
+echo ""
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Exiting. Please use: pnpm monitoring:start"
+    exit 0
+fi
+echo ""
+
 echo "🚀 Starting BatchSender with monitoring..."
 
 # Check if monitoring stack is already running

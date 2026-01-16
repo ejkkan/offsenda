@@ -12,7 +12,7 @@
     "test:unit": "vitest run src/providers/*.test.ts src/__tests__/rate-limiter.test.ts",
     "test:ratelimit": "vitest run src/__tests__/rate-limiter.test.ts",
     "test:ratelimit:integration": "vitest run src/__tests__/rate-limiter.integration.test.ts",
-    "test:integration": "vitest run src/__tests__/integration",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:e2e:watch": "vitest --config vitest.e2e.config.ts",
     "test:all": "pnpm test:unit && pnpm test:integration && pnpm test:e2e",
