@@ -21,14 +21,18 @@ resources:
   - clickhouse/service.yaml
   - clickhouse/headless-service.yaml
   - clickhouse/init-configmap.yaml
-  - clickhouse/sealed-secrets.yaml
-  - clickhouse/sealed-b2-secret.yaml
+  # Migrated to External Secrets - commented out for safe transition
+  # - clickhouse/sealed-secrets.yaml
+  # - clickhouse/sealed-b2-secret.yaml
+  - clickhouse/external-secret.yaml
+  - clickhouse/b2-external-secret.yaml
   - clickhouse/storage-configmap.yaml
   - clickhouse/cluster-configmap.yaml
   - clickhouse/keeper-configmap.yaml
   - clickhouse/backup-cronjob.yaml
   - worker/configmap.yaml
-  - worker/sealed-secrets.yaml
+  # Migrated to External Secrets
+  # - worker/sealed-secrets.yaml
   - worker/external-secret.yaml
   - worker/deployment.yaml
   - worker/service.yaml
@@ -39,7 +43,9 @@ resources:
   # worker/hpa.yaml - DISABLED: conflicts with KEDA (only use one or the other)
   # Web App - Next.js frontend
   - web/configmap.yaml
-  - web/sealed-secrets.yaml
+  # Migrated to External Secrets
+  # - web/sealed-secrets.yaml
+  - web/external-secret.yaml
   - web/deployment.yaml
   - web/service.yaml
   - web/ingress.yaml
