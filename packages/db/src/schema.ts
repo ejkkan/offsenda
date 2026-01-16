@@ -15,11 +15,17 @@ import { relations } from "drizzle-orm";
 // Enums
 export const batchStatusEnum = pgEnum("batch_status", [
   "draft",
+  "scheduled",
   "queued",
   "processing",
   "completed",
   "failed",
   "paused",
+]);
+
+export const moduleTypeEnum = pgEnum("module_type", [
+  "email",
+  "webhook",
 ]);
 
 export const recipientStatusEnum = pgEnum("recipient_status", [
@@ -41,6 +47,29 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+// Send configurations (user's module configs)
+export const sendConfigs = pgTable(
+  "send_configs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    module: moduleTypeEnum("module").notNull(),
+    config: jsonb("config").notNull().$type<SendConfigData>(),
+    rateLimit: jsonb("rate_limit").$type<RateLimitConfig>(),
+    isDefault: boolean("is_default").default(false).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    userIdIdx: index("send_configs_user_id_idx").on(table.userId),
+    userModuleIdx: index("send_configs_user_module_idx").on(table.userId, table.module),
+  })
+);
 
 // Email batches table
 export const batches = pgTable(

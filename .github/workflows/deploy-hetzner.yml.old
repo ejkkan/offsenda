@@ -1,0 +1,150 @@
+name: Deploy to Hetzner
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'k8s/**'
+      - '.github/workflows/deploy-hetzner.yml'
+  workflow_dispatch:
+    inputs:
+      deploy_monitoring:
+        description: 'Deploy monitoring stack (Grafana/Prometheus)'
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      worker-tag: ${{ steps.meta-worker.outputs.tags }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for worker
+        id: meta-worker
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/worker
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/worker/Dockerfile
+          push: true
+          tags: ${{ steps.meta-worker.outputs.tags }}
+          labels: ${{ steps.meta-worker.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Setup Kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.HETZNER_KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Update Worker Deployment
+        run: |
+          # Update the worker deployment with new image
+          kubectl set image deployment/worker \
+            worker=${{ needs.build-and-push.outputs.worker-tag }} \
+            -n batchsender
+
+          # Wait for rollout to complete
+          kubectl rollout status deployment/worker -n batchsender --timeout=300s
+
+      - name: Deploy Monitoring Stack
+        if: github.event.inputs.deploy_monitoring == 'true'
+        run: |
+          # Update Grafana password from secret
+          export GRAFANA_PASSWORD="${{ secrets.GRAFANA_ADMIN_PASSWORD }}"
+          sed -i "s/your-secure-password-here/${GRAFANA_PASSWORD}/g" k8s/monitoring/grafana-deployment.yaml
+
+          # Apply monitoring manifests
+          kubectl apply -f k8s/monitoring/prometheus-deployment.yaml
+          kubectl apply -f k8s/monitoring/grafana-deployment.yaml
+
+          # Wait for monitoring to be ready
+          kubectl wait --namespace=batchsender --for=condition=ready pod -l app=prometheus --timeout=120s
+          kubectl wait --namespace=batchsender --for=condition=ready pod -l app=grafana --timeout=120s
+
+      - name: Update ConfigMaps
+        run: |
+          # Apply any ConfigMap changes
+          kubectl apply -f k8s/base/configmap.yaml || true
+
+      - name: Run Database Migrations
+        run: |
+          # Run migrations as a Kubernetes Job
+          kubectl apply -f - <<EOF
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: db-migrate-${{ github.sha }}
+            namespace: batchsender
+          spec:
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                - name: migrate
+                  image: ${{ needs.build-and-push.outputs.worker-tag }}
+                  command: ["pnpm", "db:push"]
+                  env:
+                  - name: DATABASE_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: batchsender-secrets
+                        key: database-url
+          EOF
+
+          # Wait for migration to complete
+          kubectl wait --for=condition=complete job/db-migrate-${{ github.sha }} -n batchsender --timeout=120s
+
+      - name: Verify Deployment
+        run: |
+          echo "🚀 Deployment Complete!"
+          echo ""
+          echo "📊 Application URLs:"
+          echo "API: https://api.valuekeys.io"
+          echo "Grafana: https://grafana.valuekeys.io"
+          echo "Prometheus: https://prometheus.valuekeys.io"
+          echo ""
+          kubectl get deployments -n batchsender
+          kubectl get pods -n batchsender
