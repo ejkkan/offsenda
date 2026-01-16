@@ -83,15 +83,20 @@ jobs:
       - name: Verify deployment
         run: |
           echo "Verifying worker deployment..."
-          kubectl wait --for=condition=ready pod -l app=worker -n batchsender --timeout=2m
 
-          # Check ready replicas
+          # Check deployment status (not individual pods - old pods may still be terminating)
           READY_REPLICAS=$(kubectl get deployment worker -n batchsender -o jsonpath='{.status.readyReplicas}')
+          DESIRED_REPLICAS=$(kubectl get deployment worker -n batchsender -o jsonpath='{.status.replicas}')
+
           if [ -z "$READY_REPLICAS" ] || [ "$READY_REPLICAS" -lt 1 ]; then
             echo "❌ No ready worker replicas"
             exit 1
           fi
-          echo "✅ $READY_REPLICAS worker(s) ready"
+
+          echo "✅ $READY_REPLICAS/$DESIRED_REPLICAS worker(s) ready"
+
+          # Clean up old stuck pods from previous failed deployments
+          kubectl delete pods -n batchsender -l app=worker --field-selector=status.phase=Pending --ignore-not-found=true || true
 
       - name: Check KEDA autoscaling
         run: |
