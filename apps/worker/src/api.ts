@@ -10,7 +10,7 @@ import { collectNatsMetrics } from "./nats/monitoring.js";
 import { getModule, hasModule } from "./modules/index.js";
 import { LIMITS } from "./limits.js";
 import crypto from "crypto";
-import { log } from "./logger.js";
+import { log, generateTraceId, withTraceAsync, getTraceId } from "./logger.js";
 
 // Simple API key auth
 async function verifyApiKey(
@@ -66,6 +66,19 @@ function maskSensitiveConfig(config: unknown): unknown {
 }
 
 export async function registerApi(app: FastifyInstance): Promise<void> {
+  // Trace context middleware - extract or generate traceId for each request
+  app.addHook("onRequest", async (request, reply) => {
+    // Check for X-Trace-Id header (allows external systems to pass trace)
+    const externalTraceId = request.headers["x-trace-id"] as string | undefined;
+    const traceId = externalTraceId || generateTraceId();
+
+    // Store on request for later use
+    (request as any).traceId = traceId;
+
+    // Add to response headers so clients can correlate
+    reply.header("X-Trace-Id", traceId);
+  });
+
   // Auth middleware
   app.addHook("preHandler", async (request, reply) => {
     // Skip auth for health check, metrics, and webhooks
@@ -422,9 +435,11 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
 
   app.post("/api/batches", async (request, reply) => {
     const userId = (request as any).userId;
+    const traceId = (request as any).traceId;
 
-    try {
-      const data = createBatchSchema.parse(request.body);
+    return withTraceAsync(async () => {
+      try {
+        const data = createBatchSchema.parse(request.body);
 
       // ═══════════════════════════════════════════════════════════════════════
       // CREATION-TIME LIMITS
@@ -583,13 +598,14 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
         scheduledAt: batch.scheduledAt,
         sendConfigId: batch.sendConfigId,
       });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return reply.status(400).send({ error: "Invalid input", details: error.errors });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return reply.status(400).send({ error: "Invalid input", details: error.errors });
+        }
+        log.api.error({ error: (error as Error).message }, "create batch failed");
+        return reply.status(500).send({ error: "Failed to create batch" });
       }
-      log.api.error({ error: (error as Error).message }, "create batch failed");
-      return reply.status(500).send({ error: "Failed to create batch" });
-    }
+    }, traceId);
   });
 
   // Get batch details
@@ -635,36 +651,41 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   // Start sending a batch
   app.post("/api/batches/:id/send", async (request, reply) => {
     const userId = (request as any).userId;
+    const traceId = (request as any).traceId;
     const { id } = request.params as { id: string };
 
-    const batch = await db.query.batches.findFirst({
-      where: and(eq(batches.id, id), eq(batches.userId, userId)),
-    });
-
-    if (!batch) {
-      return reply.status(404).send({ error: "Batch not found" });
-    }
-
-    if (batch.status !== "draft") {
-      return reply.status(400).send({
-        error: `Batch is already ${batch.status}, cannot start sending`,
+    return withTraceAsync(async () => {
+      const batch = await db.query.batches.findFirst({
+        where: and(eq(batches.id, id), eq(batches.userId, userId)),
       });
-    }
 
-    // Update status to queued
-    await db
-      .update(batches)
-      .set({ status: "queued", updatedAt: new Date() })
-      .where(eq(batches.id, id));
+      if (!batch) {
+        return reply.status(404).send({ error: "Batch not found" });
+      }
 
-    // Add to processing queue
-    await queueService.enqueueBatch(id, userId);
+      if (batch.status !== "draft") {
+        return reply.status(400).send({
+          error: `Batch is already ${batch.status}, cannot start sending`,
+        });
+      }
 
-    return reply.send({
-      id: batch.id,
-      status: "queued",
-      message: "Batch queued for sending",
-    });
+      // Update status to queued
+      await db
+        .update(batches)
+        .set({ status: "queued", updatedAt: new Date() })
+        .where(eq(batches.id, id));
+
+      // Add to processing queue (traceId propagates via getTraceId() in queue-service)
+      await queueService.enqueueBatch(id, userId);
+
+      log.api.info({ batchId: id, userId }, "batch send initiated");
+
+      return reply.send({
+        id: batch.id,
+        status: "queued",
+        message: "Batch queued for sending",
+      });
+    }, traceId);
   });
 
   // Pause a batch

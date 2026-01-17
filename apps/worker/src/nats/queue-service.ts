@@ -1,7 +1,7 @@
-import { JetStreamClient, StringCodec } from "nats";
+import { JetStreamClient, StringCodec, headers as natsHeaders } from "nats";
 import type { SendConfig, SendConfigData, RateLimitConfig, ModuleType, BatchPayload } from "@batchsender/db";
 import { NatsClient } from "./client.js";
-import { log, createTimer } from "../logger.js";
+import { log, createTimer, getTraceId } from "../logger.js";
 
 // Job types
 export interface BatchJobData {
@@ -72,9 +72,17 @@ export class NatsQueueService {
     const timer = createTimer();
     const data: BatchJobData = { batchId, userId };
 
+    // Add traceId to NATS message headers for distributed tracing
+    const hdrs = natsHeaders();
+    const traceId = getTraceId();
+    if (traceId) {
+      hdrs.set("X-Trace-Id", traceId);
+    }
+
     try {
       const ack = await this.js.publish("sys.batch.process", this.sc.encode(JSON.stringify(data)), {
         msgID: `batch-${batchId}`, // Prevent duplicate processing
+        headers: hdrs,
         expect: {
           streamName: "email-system",
         },
@@ -100,12 +108,20 @@ export class NatsQueueService {
   async enqueueEmail(userId: string, email: EmailJobData): Promise<void> {
     const msgID = `email-${email.batchId}-${email.recipientId}`;
 
+    // Add traceId to NATS message headers for distributed tracing
+    const hdrs = natsHeaders();
+    const traceId = getTraceId();
+    if (traceId) {
+      hdrs.set("X-Trace-Id", traceId);
+    }
+
     try {
       const ack = await this.js.publish(
         `email.user.${userId}.send`,
         this.sc.encode(JSON.stringify(email)),
         {
           msgID, // Deduplication
+          headers: hdrs,
           expect: {
             streamName: "email-system",
           },
@@ -185,12 +201,20 @@ export class NatsQueueService {
   async enqueuePriorityEmail(email: EmailJobData): Promise<void> {
     const msgID = `priority-${email.batchId}-${email.recipientId}`;
 
+    // Add traceId to NATS message headers for distributed tracing
+    const hdrs = natsHeaders();
+    const traceId = getTraceId();
+    if (traceId) {
+      hdrs.set("X-Trace-Id", traceId);
+    }
+
     try {
       const ack = await this.js.publish(
         "email.priority.send",
         this.sc.encode(JSON.stringify(email)),
         {
           msgID,
+          headers: hdrs,
           expect: {
             streamName: "email-system",
           },

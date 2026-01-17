@@ -9,7 +9,7 @@ import { BatchJobData, JobData, EmbeddedSendConfig, NatsQueueService } from "./q
 import { NatsClient } from "./client.js";
 import { getModule } from "../modules/index.js";
 import type { JobPayload, JobResult } from "../modules/types.js";
-import { log, createTimer } from "../logger.js";
+import { log, createTimer, withTraceAsync } from "../logger.js";
 import { ProviderRateLimiter } from "../provider-rate-limiter.js";
 import {
   emailsSentTotal,
@@ -221,140 +221,146 @@ export class NatsEmailWorker {
       return;
     }
 
-    const { batchId, userId } = data;
-    const timer = createTimer();
+    // Extract traceId from message headers for distributed tracing
+    const traceId = msg.headers?.get("X-Trace-Id") || undefined;
 
-    log.batch.info({ id: batchId, userId }, "processing");
+    // Wrap processing in trace context so all logs get the same traceId
+    return withTraceAsync(async () => {
+      const { batchId, userId } = data;
+      const timer = createTimer();
 
-    // Fetch batch with send config relation
-    const batch = await db.query.batches.findFirst({
-      where: eq(batches.id, batchId),
-      with: {
-        sendConfig: true,
-      },
-    });
+      log.batch.info({ id: batchId, userId }, "processing");
 
-    if (!batch) {
-      log.batch.error({ id: batchId }, "not found");
-      throw new Error(`Batch ${batchId} not found`);
-    }
-
-    if (batch.status === "paused") {
-      log.batch.info({ id: batchId }, "skipped (paused)");
-      return;
-    }
-
-    // Build embedded send config (embed to avoid DB lookups during processing)
-    let embeddedConfig: EmbeddedSendConfig;
-    if (batch.sendConfig) {
-      embeddedConfig = {
-        id: batch.sendConfig.id,
-        module: batch.sendConfig.module,
-        config: batch.sendConfig.config,
-        rateLimit: batch.sendConfig.rateLimit,
-      };
-    } else {
-      // Backwards compatibility: use default managed email config
-      embeddedConfig = getDefaultEmailConfig();
-    }
-
-    // Update to processing
-    if (batch.status === "queued") {
-      await db
-        .update(batches)
-        .set({
-          status: "processing",
-          startedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(batches.id, batchId));
-    }
-
-    // Get all pending recipients
-    const pendingRecipients = await db.query.recipients.findMany({
-      where: and(
-        eq(recipients.batchId, batchId),
-        eq(recipients.status, "pending")
-      ),
-    });
-
-    if (pendingRecipients.length === 0) {
-      const stats = await db.query.recipients.findMany({
-        where: eq(recipients.batchId, batchId),
-        columns: { status: true },
+      // Fetch batch with send config relation
+      const batch = await db.query.batches.findFirst({
+        where: eq(batches.id, batchId),
+        with: {
+          sendConfig: true,
+        },
       });
 
-      const allDone = stats.every((r: { status: string }) => r.status !== "pending");
-      if (allDone) {
+      if (!batch) {
+        log.batch.error({ id: batchId }, "not found");
+        throw new Error(`Batch ${batchId} not found`);
+      }
+
+      if (batch.status === "paused") {
+        log.batch.info({ id: batchId }, "skipped (paused)");
+        return;
+      }
+
+      // Build embedded send config (embed to avoid DB lookups during processing)
+      let embeddedConfig: EmbeddedSendConfig;
+      if (batch.sendConfig) {
+        embeddedConfig = {
+          id: batch.sendConfig.id,
+          module: batch.sendConfig.module,
+          config: batch.sendConfig.config,
+          rateLimit: batch.sendConfig.rateLimit,
+        };
+      } else {
+        // Backwards compatibility: use default managed email config
+        embeddedConfig = getDefaultEmailConfig();
+      }
+
+      // Update to processing
+      if (batch.status === "queued") {
         await db
           .update(batches)
           .set({
-            status: "completed",
-            completedAt: new Date(),
+            status: "processing",
+            startedAt: new Date(),
             updatedAt: new Date(),
           })
           .where(eq(batches.id, batchId));
-        log.batch.info({ id: batchId, duration: timer() }, "completed");
       }
 
-      return;
-    }
-
-    // Mark all as queued in bulk
-    await db
-      .update(recipients)
-      .set({ status: "queued", updatedAt: new Date() })
-      .where(
-        and(
+      // Get all pending recipients
+      const pendingRecipients = await db.query.recipients.findMany({
+        where: and(
           eq(recipients.batchId, batchId),
           eq(recipients.status, "pending")
-        )
-      );
+        ),
+      });
 
-    // Log queued events to ClickHouse in bulk
-    const queuedEvents = pendingRecipients.map((r: { id: string; email: string | null; identifier: string | null }) => ({
-      event_type: "queued" as const,
-      module_type: embeddedConfig.module,
-      batch_id: batchId,
-      recipient_id: r.id,
-      user_id: userId,
-      email: r.identifier || r.email || "",
-    }));
+      if (pendingRecipients.length === 0) {
+        const stats = await db.query.recipients.findMany({
+          where: eq(recipients.batchId, batchId),
+          columns: { status: true },
+        });
 
-    await logEmailEvents(queuedEvents);
+        const allDone = stats.every((r: { status: string }) => r.status !== "pending");
+        if (allDone) {
+          await db
+            .update(batches)
+            .set({
+              status: "completed",
+              completedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(batches.id, batchId));
+          log.batch.info({ id: batchId, duration: timer() }, "completed");
+        }
 
-    // Record queued events metric
-    clickhouseEventsTotal.inc({ event_type: "queued" }, queuedEvents.length);
+        return;
+      }
 
-    // Create jobs with embedded send config
-    const jobs: JobData[] = pendingRecipients.map((r: { id: string; email: string | null; identifier: string | null; name: string | null; variables: Record<string, string> | null }) => ({
-      batchId,
-      recipientId: r.id,
-      userId,
-      // GENERIC: Use identifier, fallback to email for backwards compat
-      identifier: r.identifier || r.email || "",
-      // LEGACY: Keep email field for backwards compat
-      email: r.email || r.identifier || undefined,
-      name: r.name || undefined,
-      variables: r.variables as Record<string, string> | undefined,
-      sendConfig: embeddedConfig,
-      // GENERIC: Include payload if present
-      payload: batch.payload as BatchPayload | undefined,
-      // LEGACY: Email-specific fields (used by email module if no payload)
-      fromEmail: batch.fromEmail || undefined,
-      fromName: batch.fromName || undefined,
-      subject: batch.subject || undefined,
-      htmlContent: batch.htmlContent || undefined,
-      textContent: batch.textContent || undefined,
-    }));
+      // Mark all as queued in bulk
+      await db
+        .update(recipients)
+        .set({ status: "queued", updatedAt: new Date() })
+        .where(
+          and(
+            eq(recipients.batchId, batchId),
+            eq(recipients.status, "pending")
+          )
+        );
 
-    // Enqueue jobs to NATS
-    await this.queueService.enqueueEmails(userId, jobs);
+      // Log queued events to ClickHouse in bulk
+      const queuedEvents = pendingRecipients.map((r: { id: string; email: string | null; identifier: string | null }) => ({
+        event_type: "queued" as const,
+        module_type: embeddedConfig.module,
+        batch_id: batchId,
+        recipient_id: r.id,
+        user_id: userId,
+        email: r.identifier || r.email || "",
+      }));
 
-    // Ensure a consumer exists for this user
-    await this.ensureUserEmailProcessor(userId);
+      await logEmailEvents(queuedEvents);
 
-    log.batch.info({ id: batchId, jobs: jobs.length, module: embeddedConfig.module, duration: timer() }, "enqueued");
+      // Record queued events metric
+      clickhouseEventsTotal.inc({ event_type: "queued" }, queuedEvents.length);
+
+      // Create jobs with embedded send config
+      const jobs: JobData[] = pendingRecipients.map((r: { id: string; email: string | null; identifier: string | null; name: string | null; variables: Record<string, string> | null }) => ({
+        batchId,
+        recipientId: r.id,
+        userId,
+        // GENERIC: Use identifier, fallback to email for backwards compat
+        identifier: r.identifier || r.email || "",
+        // LEGACY: Keep email field for backwards compat
+        email: r.email || r.identifier || undefined,
+        name: r.name || undefined,
+        variables: r.variables as Record<string, string> | undefined,
+        sendConfig: embeddedConfig,
+        // GENERIC: Include payload if present
+        payload: batch.payload as BatchPayload | undefined,
+        // LEGACY: Email-specific fields (used by email module if no payload)
+        fromEmail: batch.fromEmail || undefined,
+        fromName: batch.fromName || undefined,
+        subject: batch.subject || undefined,
+        htmlContent: batch.htmlContent || undefined,
+        textContent: batch.textContent || undefined,
+      }));
+
+      // Enqueue jobs to NATS
+      await this.queueService.enqueueEmails(userId, jobs);
+
+      // Ensure a consumer exists for this user
+      await this.ensureUserEmailProcessor(userId);
+
+      log.batch.info({ id: batchId, jobs: jobs.length, module: embeddedConfig.module, duration: timer() }, "enqueued");
+    }, traceId);
   }
 
   // Create or get email consumer for a specific user
@@ -407,126 +413,132 @@ export class NatsEmailWorker {
       return;
     }
 
-    const {
-      batchId,
-      recipientId,
-      userId,
-      identifier,
-      email,
-      name,
-      variables,
-      sendConfig,
-      payload: batchPayload,
-      fromEmail,
-      fromName,
-      subject,
-      htmlContent,
-      textContent,
-      data: webhookData,
-    } = data;
+    // Extract traceId from message headers for distributed tracing
+    const traceId = msg.headers?.get("X-Trace-Id") || undefined;
 
-    // Get the appropriate module
-    const module = getModule(sendConfig.module);
-    if (!module) {
-      throw new Error(`Unknown module type: ${sendConfig.module}`);
-    }
+    // Wrap processing in trace context so all logs get the same traceId
+    return withTraceAsync(async () => {
+      const {
+        batchId,
+        recipientId,
+        userId,
+        identifier,
+        email,
+        name,
+        variables,
+        sendConfig,
+        payload: batchPayload,
+        fromEmail,
+        fromName,
+        subject,
+        htmlContent,
+        textContent,
+        data: webhookData,
+      } = data;
 
-    // Build merged job payload: config defaults → batch payload → legacy fields
-    const jobPayload: JobPayload = this.buildMergedPayload({
-      sendConfig,
-      batchPayload,
-      legacyFields: { fromEmail, fromName, subject, htmlContent, textContent },
-      recipient: { identifier: identifier || email || "", name, variables },
-      webhookData,
-    });
-
-    // Apply rate limiting based on send config
-    const rateLimit = sendConfig.rateLimit?.perSecond || 100;
-    const rateLimiter = getRateLimiter(sendConfig.id, rateLimit);
-    if (rateLimiter) {
-      const acquired = await rateLimiter.acquire(10000); // 10 second timeout
-      if (!acquired) {
-        throw new Error(`Rate limit timeout - could not process within 10 seconds`);
+      // Get the appropriate module
+      const module = getModule(sendConfig.module);
+      if (!module) {
+        throw new Error(`Unknown module type: ${sendConfig.module}`);
       }
-    }
 
-    // Start timing the send operation
-    const sendTimer = emailSendDuration.startTimer({ provider: sendConfig.module, status: "success" });
+      // Build merged job payload: config defaults → batch payload → legacy fields
+      const jobPayload: JobPayload = this.buildMergedPayload({
+        sendConfig,
+        batchPayload,
+        legacyFields: { fromEmail, fromName, subject, htmlContent, textContent },
+        recipient: { identifier: identifier || email || "", name, variables },
+        webhookData,
+      });
 
-    // Execute via module system
-    // Build a SendConfig-like object for the module
-    const configForModule = {
-      id: sendConfig.id,
-      userId,
-      name: "embedded",
-      module: sendConfig.module,
-      config: sendConfig.config,
-      rateLimit: sendConfig.rateLimit ?? null,
-      isDefault: false,
-      isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+      // Apply rate limiting based on send config
+      const rateLimit = sendConfig.rateLimit?.perSecond || 100;
+      const rateLimiter = getRateLimiter(sendConfig.id, rateLimit);
+      if (rateLimiter) {
+        const acquired = await rateLimiter.acquire(10000); // 10 second timeout
+        if (!acquired) {
+          throw new Error(`Rate limit timeout - could not process within 10 seconds`);
+        }
+      }
 
-    const result: JobResult = await module.execute(jobPayload, configForModule);
+      // Start timing the send operation
+      const sendTimer = emailSendDuration.startTimer({ provider: sendConfig.module, status: "success" });
 
-    if (!result.success) {
-      throw new Error(result.error || `Failed to execute ${sendConfig.module} module`);
-    }
-
-    const providerMessageId = result.providerMessageId || "";
-
-    // Update recipient status
-    await db
-      .update(recipients)
-      .set({
-        status: "sent",
-        sentAt: new Date(),
-        providerMessageId,
+      // Execute via module system
+      // Build a SendConfig-like object for the module
+      const configForModule = {
+        id: sendConfig.id,
+        userId,
+        name: "embedded",
+        module: sendConfig.module,
+        config: sendConfig.config,
+        rateLimit: sendConfig.rateLimit ?? null,
+        isDefault: false,
+        isActive: true,
+        createdAt: new Date(),
         updatedAt: new Date(),
-      })
-      .where(eq(recipients.id, recipientId));
+      };
 
-    // Increment batch sent count atomically
-    await db
-      .update(batches)
-      .set({
-        sentCount: sql`${batches.sentCount} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(eq(batches.id, batchId));
+      const result: JobResult = await module.execute(jobPayload, configForModule);
 
-    // Log to ClickHouse
-    const recipientIdentifier = identifier || email || "";
-    await logEmailEvent({
-      event_type: "sent",
-      module_type: sendConfig.module,
-      batch_id: batchId,
-      recipient_id: recipientId,
-      user_id: userId,
-      email: recipientIdentifier,
-      provider_message_id: providerMessageId,
-    });
+      if (!result.success) {
+        throw new Error(result.error || `Failed to execute ${sendConfig.module} module`);
+      }
 
-    // Index message ID for webhook lookups (for email module)
-    if (providerMessageId && sendConfig.module === "email") {
-      await indexProviderMessage({
-        provider_message_id: providerMessageId,
+      const providerMessageId = result.providerMessageId || "";
+
+      // Update recipient status
+      await db
+        .update(recipients)
+        .set({
+          status: "sent",
+          sentAt: new Date(),
+          providerMessageId,
+          updatedAt: new Date(),
+        })
+        .where(eq(recipients.id, recipientId));
+
+      // Increment batch sent count atomically
+      await db
+        .update(batches)
+        .set({
+          sentCount: sql`${batches.sentCount} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(batches.id, batchId));
+
+      // Log to ClickHouse
+      const recipientIdentifier = identifier || email || "";
+      await logEmailEvent({
+        event_type: "sent",
+        module_type: sendConfig.module,
         batch_id: batchId,
         recipient_id: recipientId,
         user_id: userId,
+        email: recipientIdentifier,
+        provider_message_id: providerMessageId,
       });
-    }
 
-    // Record metrics
-    sendTimer(); // Record send duration
-    emailsSentTotal.inc({ provider: sendConfig.module, status: "sent" });
-    clickhouseEventsTotal.inc({ event_type: "sent" });
+      // Index message ID for webhook lookups (for email module)
+      if (providerMessageId && sendConfig.module === "email") {
+        await indexProviderMessage({
+          provider_message_id: providerMessageId,
+          batch_id: batchId,
+          recipient_id: recipientId,
+          user_id: userId,
+        });
+      }
 
-    log.email.debug({ batchId, to: recipientIdentifier, module: sendConfig.module }, "sent");
+      // Record metrics
+      sendTimer(); // Record send duration
+      emailsSentTotal.inc({ provider: sendConfig.module, status: "sent" });
+      clickhouseEventsTotal.inc({ event_type: "sent" });
 
-    // Check if batch is complete
-    await this.checkBatchCompletion(batchId);
+      log.email.debug({ batchId, to: recipientIdentifier, module: sendConfig.module }, "sent");
+
+      // Check if batch is complete
+      await this.checkBatchCompletion(batchId);
+    }, traceId);
   }
 
   // Legacy alias for backwards compatibility
@@ -546,66 +558,72 @@ export class NatsEmailWorker {
       return;
     }
 
-    const { batchId, recipientId, userId, identifier, email, sendConfig } = data;
-    const recipientIdentifier = identifier || email || "";
+    // Extract traceId from message headers for distributed tracing
+    const traceId = msg.headers?.get("X-Trace-Id") || undefined;
 
-    // Check if this is the final attempt
-    const isFinalAttempt = msg.info.redeliveryCount >= 4; // 5 total attempts
+    // Wrap processing in trace context so all logs get the same traceId
+    return withTraceAsync(async () => {
+      const { batchId, recipientId, userId, identifier, email, sendConfig } = data;
+      const recipientIdentifier = identifier || email || "";
 
-    if (isFinalAttempt) {
-      // Mark as failed in database
-      await db
-        .update(recipients)
-        .set({
-          status: "failed",
-          errorMessage: error.message,
-          updatedAt: new Date(),
-        })
-        .where(eq(recipients.id, recipientId));
+      // Check if this is the final attempt
+      const isFinalAttempt = msg.info.redeliveryCount >= 4; // 5 total attempts
 
-      // Increment failed count
-      await db
-        .update(batches)
-        .set({
-          failedCount: sql`${batches.failedCount} + 1`,
-          updatedAt: new Date(),
-        })
-        .where(eq(batches.id, batchId));
+      if (isFinalAttempt) {
+        // Mark as failed in database
+        await db
+          .update(recipients)
+          .set({
+            status: "failed",
+            errorMessage: error.message,
+            updatedAt: new Date(),
+          })
+          .where(eq(recipients.id, recipientId));
 
-      // Log to ClickHouse
-      await logEmailEvent({
-        event_type: "failed",
-        module_type: sendConfig.module,
-        batch_id: batchId,
-        recipient_id: recipientId,
-        user_id: userId,
-        email: recipientIdentifier,
-        error_message: error.message,
-      });
+        // Increment failed count
+        await db
+          .update(batches)
+          .set({
+            failedCount: sql`${batches.failedCount} + 1`,
+            updatedAt: new Date(),
+          })
+          .where(eq(batches.id, batchId));
 
-      // Record error metrics
-      emailErrorsTotal.inc({ provider: sendConfig.module, error_type: "permanent" });
-      clickhouseEventsTotal.inc({ event_type: "failed" });
+        // Log to ClickHouse
+        await logEmailEvent({
+          event_type: "failed",
+          module_type: sendConfig.module,
+          batch_id: batchId,
+          recipient_id: recipientId,
+          user_id: userId,
+          email: recipientIdentifier,
+          error_message: error.message,
+        });
 
-      log.email.error(
-        { batchId, recipientId, identifier: recipientIdentifier, module: sendConfig.module, error: error.message },
-        "permanently failed"
-      );
+        // Record error metrics
+        emailErrorsTotal.inc({ provider: sendConfig.module, error_type: "permanent" });
+        clickhouseEventsTotal.inc({ event_type: "failed" });
 
-      // Check if batch is complete
-      await this.checkBatchCompletion(batchId);
+        log.email.error(
+          { batchId, recipientId, identifier: recipientIdentifier, module: sendConfig.module, error: error.message },
+          "permanently failed"
+        );
 
-      // Don't rethrow - acknowledge the message to remove it from queue
-      msg.ack();
-    } else {
-      // Retry with exponential backoff
-      const delay = Math.min(1000 * Math.pow(2, msg.info.redeliveryCount), 30000);
-      log.email.warn(
-        { batchId, recipientId, identifier: recipientIdentifier, attempt: msg.info.redeliveryCount + 1, delay },
-        "retrying"
-      );
-      msg.nak(delay);
-    }
+        // Check if batch is complete
+        await this.checkBatchCompletion(batchId);
+
+        // Don't rethrow - acknowledge the message to remove it from queue
+        msg.ack();
+      } else {
+        // Retry with exponential backoff
+        const delay = Math.min(1000 * Math.pow(2, msg.info.redeliveryCount), 30000);
+        log.email.warn(
+          { batchId, recipientId, identifier: recipientIdentifier, attempt: msg.info.redeliveryCount + 1, delay },
+          "retrying"
+        );
+        msg.nak(delay);
+      }
+    }, traceId);
   }
 
   // Check if a batch is complete and update its status
