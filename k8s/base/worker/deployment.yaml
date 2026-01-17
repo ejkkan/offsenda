@@ -17,6 +17,7 @@ spec:
       annotations:
         reloader.stakater.com/auto: "true"
     spec:
+      serviceAccountName: worker
       imagePullSecrets:
       - name: ghcr-credentials
       containers:

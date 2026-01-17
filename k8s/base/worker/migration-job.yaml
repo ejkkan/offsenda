@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migration
+  namespace: batchsender
+  labels:
+    app: db-migration
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400  # Cleanup after 24 hours
+  template:
+    metadata:
+      labels:
+        app: db-migration
+    spec:
+      serviceAccountName: worker
+      restartPolicy: OnFailure
+
+      containers:
+      - name: migrate
+        image: ghcr.io/ejkkan/offsenda-worker:latest
+        imagePullPolicy: Always
+
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+
+          echo "=== Database Migration ==="
+          echo "Starting at $(date)"
+
+          # Change to db package directory
+          cd /app/packages/db
+
+          # Apply schema changes using drizzle-kit push
+          echo "Applying schema changes..."
+          pnpm drizzle-kit push
+
+          echo "=== Migration Complete ==="
+          echo "Finished at $(date)"
+
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: worker-secrets
+              key: DATABASE_URL
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+      imagePullSecrets:
+      - name: ghcr-credentials

@@ -1,0 +1,73 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker-policy
+  namespace: batchsender
+spec:
+  podSelector:
+    matchLabels:
+      app: worker
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  # Allow ingress from any namespace on HTTP port (for ingress controller)
+  - from: []
+    ports:
+    - protocol: TCP
+      port: 6001
+
+  egress:
+  # To NATS (TLS)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: nats
+    ports:
+    - protocol: TCP
+      port: 4222
+
+  # To ClickHouse
+  - to:
+    - podSelector:
+        matchLabels:
+          app: clickhouse
+    ports:
+    - protocol: TCP
+      port: 8123
+
+  # To Dragonfly
+  - to:
+    - podSelector:
+        matchLabels:
+          app: dragonfly
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # To external services (webhooks, email providers, Neon PostgreSQL)
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+
+  # DNS resolution
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

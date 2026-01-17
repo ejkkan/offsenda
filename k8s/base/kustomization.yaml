@@ -7,6 +7,7 @@ resources:
   - namespace.yaml
   - cert-issuer.yaml
   - selfsigned-issuer.yaml
+  - rbac.yaml
   # PostgreSQL - For batch metadata storage
   - postgres/statefulset.yaml
   - postgres/service.yaml
@@ -14,11 +15,14 @@ resources:
   # DragonflyDB - For distributed rate limiting
   - dragonfly/statefulset.yaml
   - dragonfly/service.yaml
+  - dragonfly/networkpolicy.yaml
+  # NATS - Message queue with TLS
   - nats/statefulset.yaml
   - nats/service.yaml
   - nats/configmap.yaml
   - nats/certificate.yaml
   - nats/hpa.yaml
+  - nats/networkpolicy.yaml
   # ClickHouse cluster (3 replicas)
   - clickhouse/statefulset.yaml
   - clickhouse/service.yaml
@@ -35,6 +39,8 @@ resources:
   - clickhouse/keeper-configmap.yaml
   - clickhouse/backup-cronjob.yaml
   - clickhouse/ingress.yaml
+  - clickhouse/networkpolicy.yaml
+  # Worker - Email processing workers
   - worker/configmap.yaml
   # Migrated to External Secrets
   - worker/sealed-secrets.yaml
@@ -42,7 +48,7 @@ resources:
   - worker/deployment.yaml
   - worker/service.yaml
   - worker/ingress.yaml
-  # - external-secrets/github-secret-store.yaml
+  - worker/networkpolicy.yaml
   # KEDA ScaledObject for instant autoscaling (replaces HPA)
   - worker/keda-scaledobject.yaml
   # worker/hpa.yaml - DISABLED: conflicts with KEDA (only use one or the other)

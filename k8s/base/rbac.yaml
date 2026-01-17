@@ -1,0 +1,80 @@
+---
+# ServiceAccount for worker pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: worker
+  namespace: batchsender
+
+---
+# Role for worker (minimal permissions)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: worker-role
+  namespace: batchsender
+rules:
+# Allow reading ConfigMaps (for config reloading if needed)
+- apiGroups: [""]
+  resources: ["configmaps"]
+  resourceNames: ["worker-config"]
+  verbs: ["get", "watch"]
+
+# Allow reading Secrets (for TLS certs)
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["worker-secrets", "nats-tls-secret"]
+  verbs: ["get"]
+
+---
+# RoleBinding for worker
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: worker-rolebinding
+  namespace: batchsender
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: worker-role
+subjects:
+- kind: ServiceAccount
+  name: worker
+  namespace: batchsender
+
+---
+# ServiceAccount for ClickHouse (backup jobs)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: clickhouse
+  namespace: batchsender
+
+---
+# Role for ClickHouse backup job
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: clickhouse-role
+  namespace: batchsender
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["clickhouse-secrets", "clickhouse-b2-secret"]
+  verbs: ["get"]
+
+---
+# RoleBinding for ClickHouse
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: clickhouse-rolebinding
+  namespace: batchsender
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: clickhouse-role
+subjects:
+- kind: ServiceAccount
+  name: clickhouse
+  namespace: batchsender
