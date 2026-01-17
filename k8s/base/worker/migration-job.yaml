@@ -3,6 +3,9 @@ kind: Job
 metadata:
   name: db-migration
   namespace: batchsender
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
   labels:
     app: db-migration
 spec:

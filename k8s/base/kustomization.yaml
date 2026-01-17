@@ -46,6 +46,7 @@ resources:
   - worker/sealed-secrets.yaml
   # - worker/external-secret.yaml
   - worker/deployment.yaml
+  - worker/migration-job.yaml
   - worker/service.yaml
   - worker/ingress.yaml
   - worker/networkpolicy.yaml
