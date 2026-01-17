@@ -137,8 +137,6 @@ kind: DaemonSet
 metadata:
   name: promtail
   namespace: batchsender
-  annotations:
-    argocd.argoproj.io/sync-wave: "3"
 spec:
   selector:
     matchLabels:
