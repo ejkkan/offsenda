@@ -1,14 +1,20 @@
+# ServiceMonitor for worker metrics (alternative to static scrape config)
+# This ServiceMonitor targets the worker service in batchsender namespace
+# from monitoring namespace using namespaceSelector.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: worker-metrics
-  namespace: batchsender
+  name: batchsender-worker-metrics
+  namespace: monitoring
   labels:
     app: batchsender-worker
 spec:
   selector:
     matchLabels:
       app: batchsender-worker
+  namespaceSelector:
+    matchNames:
+      - batchsender
   endpoints:
   - port: http
     path: /api/metrics

@@ -21,16 +21,7 @@ spec:
         image: nats:2.10-alpine
         command: ["nats-server"]
         args:
-          - "--jetstream"
-          - "--store_dir=/data"
-          - "--cluster_name=batchsender"
-          - "--name=$(POD_NAME)"
-          - "--cluster=nats://$(POD_NAME).nats:6222"
-          - "--routes=nats://nats-0.nats:6222"
-          - "--routes=nats://nats-1.nats:6222"
-          - "--routes=nats://nats-2.nats:6222"
-          - "--http_port=8222"
-          - "--port=4222"
+          - "--config=/etc/nats-config/nats.conf"
         env:
         - name: POD_NAME
           valueFrom:
@@ -65,6 +56,19 @@ spec:
         volumeMounts:
         - name: data
           mountPath: /data
+        - name: nats-config
+          mountPath: /etc/nats-config
+          readOnly: true
+        - name: nats-certs
+          mountPath: /etc/nats-certs
+          readOnly: true
+      volumes:
+      - name: nats-config
+        configMap:
+          name: nats-config
+      - name: nats-certs
+        secret:
+          secretName: nats-tls-secret
   volumeClaimTemplates:
   - metadata:
       name: data

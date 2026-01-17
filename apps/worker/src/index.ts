@@ -16,6 +16,8 @@ import { NatsEmailWorker } from "./nats/workers.js";
 
 // Services
 import { SchedulerService } from "./services/scheduler.js";
+import { BatchRecoveryService } from "./services/batch-recovery.js";
+import { AuditService, getAuditService } from "./services/audit.js";
 
 const app = Fastify({
   logger: false,  // We use our own structured logger
@@ -117,6 +119,8 @@ export let queueService: NatsQueueService;
 export let rateLimiterService: RateLimiterService;
 let worker: NatsEmailWorker;
 let scheduler: SchedulerService;
+let batchRecovery: BatchRecoveryService;
+let auditService: AuditService;
 
 // Register routes
 await registerWebhooks(app);
@@ -222,6 +226,24 @@ try {
   scheduler.start();
   log.system.info({}, "scheduler started");
 
+  // Start batch recovery service (detects and fixes stuck batches)
+  batchRecovery = new BatchRecoveryService({
+    enabled: config.BATCH_RECOVERY_ENABLED,
+    scanIntervalMs: config.BATCH_RECOVERY_INTERVAL_MS,
+    stuckThresholdMs: config.BATCH_RECOVERY_THRESHOLD_MS,
+    maxBatchesPerScan: config.BATCH_RECOVERY_MAX_PER_SCAN,
+  });
+  batchRecovery.start();
+
+  // Start audit service (security logging to ClickHouse)
+  auditService = getAuditService({
+    enabled: config.AUDIT_ENABLED,
+    logToConsole: config.AUDIT_LOG_TO_CONSOLE,
+    batchSize: config.AUDIT_BATCH_SIZE,
+    flushIntervalMs: config.AUDIT_FLUSH_INTERVAL_MS,
+  });
+  auditService.start();
+
   // Sync any queued batches from DB to NATS on startup
   await syncQueuedBatchesToQueue();
 
@@ -273,6 +295,12 @@ async function shutdown() {
 
   // Stop scheduler
   scheduler.stop();
+
+  // Stop batch recovery
+  batchRecovery.stop();
+
+  // Stop audit service (flush remaining events)
+  await auditService.stop();
 
   // Stop accepting new work
   await worker.shutdown();

@@ -1,8 +1,11 @@
+# Pod Disruption Budgets for monitoring components
+# Ensures minimum availability during voluntary disruptions (upgrades, drains)
+
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: prometheus-pdb
-  namespace: batchsender
+  namespace: monitoring
 spec:
   minAvailable: 1
   selector:
@@ -14,7 +17,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: grafana-pdb
-  namespace: batchsender
+  namespace: monitoring
 spec:
   minAvailable: 1
   selector:
@@ -22,6 +25,7 @@ spec:
       app: grafana
 
 ---
+# NATS PDB remains in batchsender namespace where NATS is deployed
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

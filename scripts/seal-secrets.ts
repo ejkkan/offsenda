@@ -264,7 +264,7 @@ async function sealSecrets(secrets: EnvSecrets): Promise<void> {
 
   await sealSecret(
     'loki-b2-credentials',
-    'batchsender',
+    'monitoring',  // Deployed to monitoring namespace
     {
       'access-key-id': secrets.B2_KEY_ID,
       'secret-access-key': secrets.B2_APP_KEY,
@@ -292,10 +292,14 @@ async function sealSecrets(secrets: EnvSecrets): Promise<void> {
 
   await sealSecret(
     'grafana-secret',
-    'batchsender',
+    'monitoring',  // Deployed to monitoring namespace
     {
       'admin-password': secrets.GRAFANA_ADMIN_PASSWORD,
       'neon-db-password': secrets.NEON_DB_PASSWORD,
+      // ClickHouse credentials are duplicated here because secrets cannot be
+      // accessed cross-namespace (ClickHouse runs in batchsender namespace)
+      'clickhouse-user': secrets.CLICKHOUSE_USER,
+      'clickhouse-password': secrets.CLICKHOUSE_PASSWORD,
     },
     'k8s/monitoring/sealed-grafana-secret.yaml'
   );
@@ -309,7 +313,7 @@ async function sealSecrets(secrets: EnvSecrets): Promise<void> {
 
   await sealSecret(
     'prometheus-basic-auth',
-    'batchsender',
+    'monitoring',  // Deployed to monitoring namespace
     {
       users: prometheusAuth,  // Traefik BasicAuth expects 'users' key, not 'auth'
     },

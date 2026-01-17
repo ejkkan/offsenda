@@ -3,6 +3,8 @@ kind: Kustomization
 namespace: batchsender
 
 resources:
+  - certificate.yaml
+  - configmap.yaml
   - statefulset.yaml
   - service.yaml
   - hpa.yaml

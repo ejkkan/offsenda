@@ -6,6 +6,7 @@ namespace: batchsender
 resources:
   - namespace.yaml
   - cert-issuer.yaml
+  - selfsigned-issuer.yaml
   # PostgreSQL - For batch metadata storage
   - postgres/statefulset.yaml
   - postgres/service.yaml
@@ -15,6 +16,8 @@ resources:
   - dragonfly/service.yaml
   - nats/statefulset.yaml
   - nats/service.yaml
+  - nats/configmap.yaml
+  - nats/certificate.yaml
   - nats/hpa.yaml
   # ClickHouse cluster (3 replicas)
   - clickhouse/statefulset.yaml

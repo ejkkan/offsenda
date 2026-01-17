@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-config
-  namespace: batchsender
+  namespace: monitoring
 data:
   grafana.ini: |
     [server]
@@ -25,7 +25,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-datasources
-  namespace: batchsender
+  namespace: monitoring
 data:
   datasources.yaml: |
     apiVersion: 1
@@ -42,7 +42,8 @@ data:
         uid: clickhouse
         access: proxy
         jsonData:
-          host: clickhouse
+          # Cross-namespace reference: ClickHouse runs in batchsender namespace
+          host: clickhouse.batchsender
           port: 8123
           protocol: http
           defaultDatabase: default
@@ -81,7 +82,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-providers
-  namespace: batchsender
+  namespace: monitoring
 data:
   dashboards.yaml: |
     apiVersion: 1
@@ -100,7 +101,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-dashboards
-  namespace: batchsender
+  namespace: monitoring
 data:
   batchsender.json: |
     {
@@ -599,7 +600,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: grafana
-  namespace: batchsender
+  namespace: monitoring
 spec:
   replicas: 1
   selector:
@@ -633,16 +634,18 @@ spec:
             secretKeyRef:
               name: grafana-secret
               key: neon-db-password
+        # ClickHouse credentials are in batchsender namespace; they're duplicated
+        # in grafana-secret for cross-namespace access
         - name: CLICKHOUSE_USER
           valueFrom:
             secretKeyRef:
-              name: clickhouse-secrets
-              key: user
+              name: grafana-secret
+              key: clickhouse-user
         - name: CLICKHOUSE_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: clickhouse-secrets
-              key: password
+              name: grafana-secret
+              key: clickhouse-password
         volumeMounts:
         - name: grafana-config
           mountPath: /etc/grafana/grafana.ini
@@ -703,7 +706,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: grafana-pvc
-  namespace: batchsender
+  namespace: monitoring
 spec:
   accessModes:
     - ReadWriteOnce
@@ -717,7 +720,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: grafana
-  namespace: batchsender
+  namespace: monitoring
 spec:
   selector:
     app: grafana
@@ -730,7 +733,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: grafana-ingress
-  namespace: batchsender
+  namespace: monitoring
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
     traefik.ingress.kubernetes.io/router.entrypoints: websecure

@@ -23,10 +23,13 @@ patches:
   - patch: |-
       - op: replace
         path: /data/NATS_CLUSTER
-        value: nats://nats:4222
+        value: tls://nats:4222
       - op: add
         path: /data/NATS_REPLICAS
         value: "1"
+      - op: add
+        path: /data/NATS_TLS_ENABLED
+        value: "true"
     target:
       kind: ConfigMap
       name: worker-config
@@ -54,18 +57,11 @@ patches:
       kind: StatefulSet
       name: dragonfly
 
-  # Single-node NATS for local dev (no clustering)
+  # Single-node NATS for local dev with TLS
   - patch: |-
       - op: replace
         path: /spec/replicas
         value: 1
-      - op: replace
-        path: /spec/template/spec/containers/0/args
-        value:
-          - "--jetstream"
-          - "--store_dir=/data"
-          - "--http_port=8222"
-          - "--port=4222"
       - op: replace
         path: /spec/template/spec/containers/0/resources/requests/memory
         value: 256Mi
@@ -75,6 +71,12 @@ patches:
     target:
       kind: StatefulSet
       name: nats
+
+  # Override NATS config for local single-node TLS (no cluster routes)
+  - path: nats-configmap.yaml
+    target:
+      kind: ConfigMap
+      name: nats-config
 
   # Disable NATS HPA for local dev
   - patch: |-

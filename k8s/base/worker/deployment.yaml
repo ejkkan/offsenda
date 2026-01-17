@@ -49,5 +49,14 @@ spec:
             port: 6001
           initialDelaySeconds: 10
           periodSeconds: 10
+        volumeMounts:
+        - name: nats-tls
+          mountPath: /etc/nats-certs
+          readOnly: true
+      volumes:
+      - name: nats-tls
+        secret:
+          secretName: nats-tls-secret
+          optional: true  # Allow startup without TLS in local dev
       # Graceful shutdown - give NATS workers time to finish
       terminationGracePeriodSeconds: 60

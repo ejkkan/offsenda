@@ -6,13 +6,14 @@
 # and adds labels (namespace, pod, container, app) for filtering in Grafana.
 #
 # Logs are read from: /var/log/pods/*
+# Scrapes only batchsender namespace to ensure all logs are JSON formatted.
 # =============================================================================
 
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: promtail-config
-  namespace: batchsender
+  namespace: monitoring
 data:
   promtail.yaml: |
     server:
@@ -27,7 +28,7 @@ data:
         tenant_id: batchsender
 
     scrape_configs:
-      # Scrape logs from all kubernetes pods
+      # Scrape logs from kubernetes pods in batchsender namespace
       - job_name: kubernetes-pods
         kubernetes_sd_configs:
           - role: pod
@@ -64,7 +65,7 @@ data:
                 - RFC3339
 
         relabel_configs:
-          # Only scrape pods in batchsender namespace
+          # Only scrape pods in batchsender namespace (application code with JSON logs)
           - source_labels: [__meta_kubernetes_namespace]
             action: keep
             regex: batchsender
@@ -100,7 +101,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: promtail
-  namespace: batchsender
+  namespace: monitoring
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -125,7 +126,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: promtail
-    namespace: batchsender
+    namespace: monitoring
 roleRef:
   kind: ClusterRole
   name: promtail
@@ -136,7 +137,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: promtail
-  namespace: batchsender
+  namespace: monitoring
 spec:
   selector:
     matchLabels:

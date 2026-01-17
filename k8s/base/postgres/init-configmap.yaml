@@ -8,6 +8,7 @@ data:
     -- Create enums
     CREATE TYPE batch_status AS ENUM (
       'draft',
+      'scheduled',
       'queued',
       'processing',
       'completed',

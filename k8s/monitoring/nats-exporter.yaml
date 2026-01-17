@@ -6,7 +6,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nats-exporter
-  namespace: batchsender
+  namespace: monitoring
   labels:
     app: nats-exporter
 spec:
@@ -26,7 +26,8 @@ spec:
           - "-varz"
           - "-connz"
           - "-jsz=all"
-          - "http://nats:8222"
+          # Cross-namespace reference: NATS runs in batchsender namespace
+          - "http://nats.batchsender:8222"
         ports:
         - containerPort: 7777
           name: metrics
@@ -53,7 +54,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nats-exporter
-  namespace: batchsender
+  namespace: monitoring
   labels:
     app: nats-exporter
 spec:

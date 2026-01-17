@@ -1,0 +1,17 @@
+# =============================================================================
+# Monitoring Namespace
+# =============================================================================
+# Dedicated namespace for observability infrastructure.
+# Separates monitoring components from application workloads for:
+# - Clean log format contracts (batchsender = JSON logs only)
+# - Standard Kubernetes namespace isolation
+# - Multi-application monitoring readiness
+# =============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/name: monitoring
+    app.kubernetes.io/part-of: batchsender-observability

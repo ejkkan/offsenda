@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+// Helper for parsing string booleans from environment variables
+// z.coerce.boolean() treats any non-empty string as true, including "false"
+const stringBoolean = z
+  .union([z.boolean(), z.string()])
+  .transform((val) => {
+    if (typeof val === "boolean") return val;
+    return val.toLowerCase() === "true";
+  });
+
 const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().url(),
@@ -7,6 +16,10 @@ const envSchema = z.object({
   // NATS JetStream
   NATS_CLUSTER: z.string().default("nats://localhost:4222"),
   NATS_REPLICAS: z.coerce.number().min(1).max(5).default(1),
+  NATS_TLS_ENABLED: stringBoolean.default(false),
+  NATS_TLS_CA_FILE: z.string().optional(), // Path to CA cert for verification
+  NATS_TLS_CERT_FILE: z.string().optional(), // Path to client cert (if mutual TLS)
+  NATS_TLS_KEY_FILE: z.string().optional(), // Path to client key (if mutual TLS)
 
   // ClickHouse
   CLICKHOUSE_URL: z.string().url().default("http://localhost:8123"),
@@ -56,10 +69,41 @@ const envSchema = z.object({
   // Request validation
   MAX_REQUEST_SIZE_BYTES: z.coerce.number().default(10 * 1024 * 1024), // 10MB
   RATE_LIMIT_PER_IP: z.coerce.number().default(100), // requests per minute per IP
-  DISABLE_RATE_LIMIT: z.coerce.boolean().default(false), // Disable rate limiting (for E2E tests)
+  DISABLE_RATE_LIMIT: stringBoolean.default(false), // Disable rate limiting (for E2E tests)
 
   // Environment
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+
+  // =============================================================================
+  // Batch Recovery Service
+  // =============================================================================
+  // Detects and recovers stuck batches that are in "processing" status
+  // but have all recipients in final states.
+  BATCH_RECOVERY_ENABLED: stringBoolean.default(true),
+  BATCH_RECOVERY_INTERVAL_MS: z.coerce.number().default(5 * 60 * 1000), // 5 minutes
+  BATCH_RECOVERY_THRESHOLD_MS: z.coerce.number().default(15 * 60 * 1000), // 15 minutes
+  BATCH_RECOVERY_MAX_PER_SCAN: z.coerce.number().default(100),
+
+  // =============================================================================
+  // Webhook Resilience
+  // =============================================================================
+  // Configures retry and circuit breaker for outgoing webhook calls
+  WEBHOOK_TIMEOUT_MS: z.coerce.number().default(30000), // 30 seconds
+  WEBHOOK_MAX_RETRIES: z.coerce.number().default(3),
+  WEBHOOK_RETRY_BASE_DELAY_MS: z.coerce.number().default(1000), // 1 second
+  WEBHOOK_RETRY_MAX_DELAY_MS: z.coerce.number().default(10000), // 10 seconds
+  WEBHOOK_CIRCUIT_BREAKER_ENABLED: stringBoolean.default(true),
+  WEBHOOK_CIRCUIT_FAILURE_THRESHOLD: z.coerce.number().default(5),
+  WEBHOOK_CIRCUIT_RESET_TIMEOUT_MS: z.coerce.number().default(30000), // 30 seconds
+
+  // =============================================================================
+  // Audit Logging
+  // =============================================================================
+  // Comprehensive audit logging for security and compliance
+  AUDIT_ENABLED: stringBoolean.default(true),
+  AUDIT_LOG_TO_CONSOLE: stringBoolean.default(false),
+  AUDIT_BATCH_SIZE: z.coerce.number().default(100),
+  AUDIT_FLUSH_INTERVAL_MS: z.coerce.number().default(5000), // 5 seconds
 });
 
 function loadConfig() {

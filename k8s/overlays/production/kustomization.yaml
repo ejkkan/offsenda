@@ -31,6 +31,12 @@ patches:
     - op: replace
       path: /data/NODE_ENV
       value: production
+    - op: replace
+      path: /data/NATS_TLS_ENABLED
+      value: "true"
+    - op: replace
+      path: /data/NATS_CLUSTER
+      value: "tls://nats.batchsender.svc:4222"
   target:
     kind: ConfigMap
     name: worker-config
@@ -67,15 +73,9 @@ patches:
   target:
     kind: StatefulSet
     name: nats
-- patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/args
-      value:
-        - --jetstream
-        - --store_dir=/data
-        - --name=$(POD_NAME)
-        - --http_port=8222
-        - --port=4222
+
+# Override NATS config for production single-node TLS
+- path: nats-configmap.yaml
   target:
-    kind: StatefulSet
-    name: nats
+    kind: ConfigMap
+    name: nats-config

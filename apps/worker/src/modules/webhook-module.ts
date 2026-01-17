@@ -1,15 +1,58 @@
 import type { Module, JobPayload, JobResult, ValidationResult, SendConfig, WebhookModuleConfig } from "./types.js";
 import { log } from "../logger.js";
+import { ResilientHttpClient, type ResilientClientConfig } from "../http/resilient-client.js";
+
+// =============================================================================
+// Webhook Module - Enhanced with Resilient HTTP Client
+// =============================================================================
+// Sends HTTP POST/PUT requests to user's endpoints with:
+// - Automatic retry with exponential backoff
+// - Circuit breaker for failing endpoints
+// - Configurable timeout and success codes
+// - Template variable substitution
+// =============================================================================
 
 /**
  * Webhook Module - Sends HTTP POST/PUT requests to user's endpoints
  *
  * Users configure their endpoint URL and we call it for each job,
- * handling rate limiting, retries, and monitoring.
+ * handling rate limiting, retries, and monitoring via the resilient HTTP client.
  */
 export class WebhookModule implements Module {
   readonly type = "webhook";
   readonly name = "Webhook";
+
+  // Shared HTTP client with circuit breaker (per endpoint)
+  private httpClient: ResilientHttpClient;
+
+  constructor(clientConfig?: Partial<ResilientClientConfig>) {
+    // Create resilient HTTP client with webhook-optimized defaults
+    this.httpClient = new ResilientHttpClient({
+      defaultTimeout: 30000,
+      retry: {
+        maxRetries: 3,
+        baseDelayMs: 1000,
+        maxDelayMs: 10000,
+        backoffMultiplier: 2,
+        jitter: true,
+        retryableStatusCodes: [408, 429, 500, 502, 503, 504],
+        retryOnTimeout: true,
+        retryOnNetworkError: true,
+      },
+      circuitBreaker: {
+        enabled: true,
+        failureThreshold: 5,
+        successThreshold: 2,
+        resetTimeoutMs: 30000,
+        failureWindowMs: 60000,
+      },
+      defaultHeaders: {
+        "User-Agent": "BatchSender/1.0",
+        "Content-Type": "application/json",
+      },
+      ...clientConfig,
+    });
+  }
 
   validateConfig(rawConfig: unknown): ValidationResult {
     const errors: string[] = [];
@@ -89,76 +132,77 @@ export class WebhookModule implements Module {
   ): Promise<Omit<JobResult, "latencyMs">> {
     const method = cfg.method || "POST";
     const timeout = cfg.timeout || 30000;
-    const successCodes = cfg.successStatusCodes || [200, 201, 202];
+    const successCodes = cfg.successStatusCodes || [200, 201, 202, 204];
+    const maxRetries = cfg.retries ?? 3;
 
     // Build request body
     const body = this.buildRequestBody(payload, cfg);
 
-    // Make the request with timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    // Update client config based on per-request settings
+    // (The client handles retry internally, but we can override timeout)
+    const result = await this.httpClient.request<Record<string, unknown>>(cfg.url, {
+      method,
+      headers: cfg.headers,
+      body,
+      timeout,
+    });
 
-    try {
-      const response = await fetch(cfg.url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "BatchSender/1.0",
-          ...cfg.headers,
-        },
-        body,
-        signal: controller.signal,
-      });
+    // Circuit breaker tripped
+    if (result.circuitBreakerTripped) {
+      log.webhook.warn({ url: cfg.url }, "circuit breaker open, request blocked");
+      return {
+        success: false,
+        error: "Circuit breaker open - too many recent failures",
+      };
+    }
 
-      clearTimeout(timeoutId);
+    // Request failed after retries
+    if (!result.success || !result.response) {
+      log.webhook.warn(
+        { url: cfg.url, error: result.error, attempts: result.attempts },
+        "webhook failed after retries"
+      );
+      return {
+        success: false,
+        error: result.error || "Request failed",
+      };
+    }
 
-      const success = successCodes.includes(response.status);
+    const response = result.response;
+    const success = successCodes.includes(response.status);
 
-      // Try to extract message ID from response
-      let providerMessageId: string | undefined;
-      if (success) {
-        try {
-          const json = await response.json();
-          providerMessageId =
-            (json as Record<string, unknown>).id?.toString() ||
-            (json as Record<string, unknown>).messageId?.toString() ||
-            (json as Record<string, unknown>).message_id?.toString();
-        } catch {
-          // Response not JSON, that's fine
-        }
-      }
+    // Try to extract message ID from response
+    let providerMessageId: string | undefined;
+    if (success && typeof response.body === "object" && response.body !== null) {
+      const json = response.body as Record<string, unknown>;
+      providerMessageId =
+        json.id?.toString() ||
+        json.messageId?.toString() ||
+        json.message_id?.toString();
+    }
 
-      if (!success) {
-        let errorBody = "";
-        try {
-          errorBody = await response.text();
-        } catch {
-          // Ignore
-        }
-        return {
-          success: false,
-          statusCode: response.status,
-          error: `HTTP ${response.status}: ${errorBody.slice(0, 200)}`,
-        };
-      }
+    if (!success) {
+      const errorBody = typeof response.body === "string"
+        ? (response.body as string).slice(0, 200)
+        : JSON.stringify(response.body || {}).slice(0, 200);
 
       return {
-        success: true,
+        success: false,
         statusCode: response.status,
-        providerMessageId,
+        error: `HTTP ${response.status}: ${errorBody}`,
       };
-    } catch (error) {
-      clearTimeout(timeoutId);
-
-      if (error instanceof Error && error.name === "AbortError") {
-        return {
-          success: false,
-          error: `Request timeout after ${timeout}ms`,
-        };
-      }
-
-      throw error;
     }
+
+    log.webhook.debug(
+      { url: cfg.url, status: response.status, attempts: result.attempts },
+      "webhook succeeded"
+    );
+
+    return {
+      success: true,
+      statusCode: response.status,
+      providerMessageId,
+    };
   }
 
   /**
@@ -194,5 +238,26 @@ export class WebhookModule implements Module {
       result = result.replace(new RegExp(`{{${key}}}`, "g"), value);
     }
     return result;
+  }
+
+  /**
+   * Get circuit breaker status for all endpoints (for monitoring)
+   */
+  getCircuitStatus(): Map<string, { state: string; failures: number }> {
+    return this.httpClient.getCircuitStatus();
+  }
+
+  /**
+   * Reset circuit breaker for a specific endpoint
+   */
+  resetCircuit(host: string): void {
+    this.httpClient.resetCircuit(host);
+  }
+
+  /**
+   * Reset all circuit breakers
+   */
+  resetAllCircuits(): void {
+    this.httpClient.resetAllCircuits();
   }
 }

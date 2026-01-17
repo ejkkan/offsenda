@@ -13,7 +13,10 @@ spec:
     path: k8s/monitoring
   destination:
     server: https://kubernetes.default.svc
-    namespace: batchsender
+    # Deploy to monitoring namespace (observability infrastructure)
+    # Note: Resources with explicit namespace fields (like nats-pdb in batchsender)
+    # will be deployed to their specified namespace regardless of this setting.
+    namespace: monitoring
   syncPolicy:
     automated:
       prune: true

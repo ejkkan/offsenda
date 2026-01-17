@@ -10,9 +10,12 @@ import {
   AckPolicy,
   DeliverPolicy,
   ReplayPolicy,
+  type ConnectionOptions,
+  type TlsOptions,
 } from "nats";
 import { config } from "../config.js";
 import { log } from "../logger.js";
+import { readFileSync } from "node:fs";
 
 export class NatsClient {
   private nc: NatsConnection | null = null;
@@ -25,19 +28,44 @@ export class NatsClient {
     const maxRetries = 10;
     const baseDelay = 1000; // 1 second
 
+    // Build connection options
+    const connectionOptions: ConnectionOptions = {
+      servers,
+      name: `worker-${config.WORKER_ID}`,
+      reconnect: true,
+      maxReconnectAttempts: -1,
+      reconnectTimeWait: 2000,
+      pingInterval: 30000,
+      maxPingOut: 3,
+    };
+
+    // Configure TLS if enabled
+    if (config.NATS_TLS_ENABLED) {
+      log.system.info({}, "NATS TLS enabled");
+
+      const tlsOptions: TlsOptions = {};
+
+      // Load CA certificate if provided
+      if (config.NATS_TLS_CA_FILE) {
+        tlsOptions.ca = readFileSync(config.NATS_TLS_CA_FILE, "utf-8");
+        log.system.debug({ caFile: config.NATS_TLS_CA_FILE }, "Loaded NATS CA certificate");
+      }
+
+      // Load client certificate if provided (for mutual TLS)
+      if (config.NATS_TLS_CERT_FILE && config.NATS_TLS_KEY_FILE) {
+        tlsOptions.cert = readFileSync(config.NATS_TLS_CERT_FILE, "utf-8");
+        tlsOptions.key = readFileSync(config.NATS_TLS_KEY_FILE, "utf-8");
+        log.system.debug({}, "Loaded NATS client certificate for mutual TLS");
+      }
+
+      connectionOptions.tls = tlsOptions;
+    }
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        log.system.info({ servers, attempt, maxRetries }, "Connecting to NATS cluster");
+        log.system.info({ servers, attempt, maxRetries, tls: config.NATS_TLS_ENABLED }, "Connecting to NATS cluster");
 
-        this.nc = await connect({
-          servers,
-          name: `worker-${config.WORKER_ID}`,
-          reconnect: true,
-          maxReconnectAttempts: -1,
-          reconnectTimeWait: 2000,
-          pingInterval: 30000,
-          maxPingOut: 3,
-        });
+        this.nc = await connect(connectionOptions);
 
         this.js = this.nc.jetstream();
         this.jsm = await this.nc.jetstreamManager();

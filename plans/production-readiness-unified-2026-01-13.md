@@ -51,7 +51,7 @@ Implemented comprehensive request validation:
 - Content-Type validation for POST/PUT/PATCH requests
 - Automatic cleanup of expired rate limit entries
 
-**Progress:** 3/23 items completed (13%)
+**Progress:** 6/23 items completed (26%)
 
 ---
 
@@ -59,131 +59,117 @@ Implemented comprehensive request validation:
 
 These are **high-impact, low-effort** improvements you can implement TODAY or this week:
 
-### 4. Stuck Batch Detector (45 minutes) 🔍
+### 4. Stuck Batch Detector (45 minutes) 🔍 ✅
 **Impact:** HIGH | **Effort:** LOW | **Risk:** None
+**Status:** COMPLETED (2026-01-17)
 
 **Why:** Batches get stuck in "processing" status when all emails are sent but completion check fails. Users can't tell if batch finished. No automatic recovery exists.
 
-**Implementation:**
-```typescript
-// Add to apps/worker/src/nats/workers.ts
-async detectAndRecoverStuckBatches(): Promise<void> {
-  const stuckThreshold = new Date(Date.now() - 15 * 60 * 1000);
-  const stuckBatches = await db.query.batches.findMany({
-    where: and(
-      eq(batches.status, "processing"),
-      sql`${batches.startedAt} < ${stuckThreshold}`
-    ),
-  });
+**Implementation:** Done! Created a dedicated `BatchRecoveryService` with:
+- Periodic scanning (configurable interval, default 5 minutes)
+- Configurable stuck threshold (default 15 minutes)
+- Automatic recovery of batches with all recipients in final state
+- Circuit breaker to prevent overload
+- Prometheus metrics for monitoring
 
-  for (const batch of stuckBatches) {
-    await this.checkBatchCompletion(batch.id);
-  }
-}
+**Files created:**
+- `apps/worker/src/services/batch-recovery.ts` - Full recovery service
 
-// Add to apps/worker/src/index.ts
-setInterval(() => {
-  worker?.detectAndRecoverStuckBatches()
-    .catch((error) => log.system.error({ error }, "Stuck batch detection failed"));
-}, 5 * 60 * 1000);
-```
-
-**Files to modify:**
-- `apps/worker/src/nats/workers.ts` (add detector method)
-- `apps/worker/src/index.ts` (add periodic scanner)
-
-**Note:** Already approved in `stuck-batch-detector-2026-01-13.md`
+**Configuration (via environment):**
+- `BATCH_RECOVERY_ENABLED` - Enable/disable the service
+- `BATCH_RECOVERY_INTERVAL_MS` - Scan interval (default: 5 minutes)
+- `BATCH_RECOVERY_THRESHOLD_MS` - Stuck threshold (default: 15 minutes)
+- `BATCH_RECOVERY_MAX_PER_SCAN` - Max batches per scan (default: 100)
 
 ---
 
-### 5. Webhook Timeout and Retry Logic (2-3 hours) ⏱️
+### 5. Webhook Timeout and Retry Logic (2-3 hours) ⏱️ ✅
 **Impact:** MEDIUM | **Effort:** LOW | **Risk:** Low
+**Status:** COMPLETED (2026-01-17)
 
 **Why:** Webhooks have no timeout and can hang indefinitely. No retry on transient failures. Single slow webhook can block others.
 
-**Implementation:**
-```typescript
-// apps/worker/src/webhooks.ts
-const WEBHOOK_TIMEOUT_MS = 5000; // 5 seconds
-const MAX_RETRIES = 3;
+**Implementation:** Done! Created a comprehensive resilient HTTP client with:
+- Configurable retry with exponential backoff and jitter
+- Circuit breaker pattern (per-endpoint)
+- Request timeout with AbortController
+- Error classification (transient vs permanent)
+- Metrics and logging integration
 
-async function processWebhookWithTimeout(webhook: WebhookData) {
-  return Promise.race([
-    processWebhook(webhook),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Webhook timeout')), WEBHOOK_TIMEOUT_MS)
-    )
-  ]);
-}
+**Files created:**
+- `apps/worker/src/http/resilient-client.ts` - Full HTTP client with retry/circuit breaker
+- Updated `apps/worker/src/modules/webhook-module.ts` - Uses resilient client
 
-// Add retry logic with exponential backoff
-async function processWebhookWithRetry(webhook: WebhookData, attempt = 1): Promise<void> {
-  try {
-    await processWebhookWithTimeout(webhook);
-  } catch (error) {
-    if (attempt < MAX_RETRIES) {
-      const backoffMs = Math.min(1000 * Math.pow(2, attempt), 10000);
-      await new Promise(resolve => setTimeout(resolve, backoffMs));
-      return processWebhookWithRetry(webhook, attempt + 1);
-    }
-    throw error;
-  }
-}
-```
-
-**Files to modify:**
-- `apps/worker/src/webhooks.ts`
-- `apps/worker/src/config.ts` (add WEBHOOK_TIMEOUT_MS)
+**Configuration (via environment):**
+- `WEBHOOK_TIMEOUT_MS` - Request timeout (default: 30s)
+- `WEBHOOK_MAX_RETRIES` - Max retry attempts (default: 3)
+- `WEBHOOK_RETRY_BASE_DELAY_MS` - Initial delay (default: 1s)
+- `WEBHOOK_RETRY_MAX_DELAY_MS` - Max delay (default: 10s)
+- `WEBHOOK_CIRCUIT_BREAKER_ENABLED` - Enable circuit breaker
+- `WEBHOOK_CIRCUIT_FAILURE_THRESHOLD` - Failures before open (default: 5)
+- `WEBHOOK_CIRCUIT_RESET_TIMEOUT_MS` - Reset timeout (default: 30s)
 
 ---
 
-### 6. Enable TLS for NATS (2-4 hours) 🔒
+### 6. Enable TLS for NATS (2-4 hours) 🔒 ✅
 **Impact:** HIGH | **Effort:** LOW | **Risk:** Medium
+**Status:** COMPLETED (2026-01-17)
 
 **Why:** Encrypts all message traffic between workers and NATS. Currently unencrypted.
 
-**Implementation:**
-```yaml
-# k8s/base/nats/statefulset.yaml
-- name: nats
-  args:
-    - "--tls"
-    - "--tlscert=/etc/nats-tls/tls.crt"
-    - "--tlskey=/etc/nats-tls/tls.key"
-```
+**Implementation:** Done! Created full TLS setup with:
+- Certificate resource using cert-manager (self-signed for internal use)
+- NATS config ConfigMap with TLS settings for client and cluster connections
+- Worker deployment with TLS certificate volume mount
+- Worker NATS client with TLS connection support
+- Production overlay enables TLS automatically
 
-**Files to modify:**
-- `k8s/base/nats/statefulset.yaml`
-- `k8s/base/nats/certificate.yaml` (create)
-- `apps/worker/src/nats/client.ts` (update connection URL to `tls://`)
+**Files created/modified:**
+- `k8s/base/nats/certificate.yaml` - TLS certificate for NATS
+- `k8s/base/nats/configmap.yaml` - NATS server config with TLS
+- `k8s/base/nats/statefulset.yaml` - Updated to use TLS config
+- `apps/worker/src/nats/client.ts` - Added TLS connection options
+- `apps/worker/src/config.ts` - Added NATS_TLS_* config options
+- `k8s/base/worker/deployment.yaml` - Mounts TLS certificates
+- `k8s/overlays/production/kustomization.yaml` - Enables TLS in production
 
-**Testing:** Verify workers can connect after deployment
+**Configuration:**
+- `NATS_TLS_ENABLED` - Enable/disable TLS (default: false in dev, true in prod)
+- `NATS_TLS_CA_FILE` - Path to CA certificate
 
 ---
 
-### 7. Implement Audit Logging (4-6 hours) 📝
+### 7. Implement Audit Logging (4-6 hours) 📝 ✅
 **Impact:** HIGH | **Effort:** LOW | **Risk:** Low
+**Status:** COMPLETED (2026-01-17)
 
 **Why:** Track all sensitive operations for security and debugging. Required for compliance.
 
-**Implementation:**
-```typescript
-// New file: apps/worker/src/audit.ts
-export async function logAudit(event: {
-  action: string;
-  userId: string;
-  resource: string;
-  metadata?: Record<string, any>;
-}) {
-  // Log to ClickHouse audit_log table
-  // Include timestamp, IP, user agent
-}
-```
+**Implementation:** Done! Created a comprehensive audit logging system with:
+- Type-safe event definitions (categories, actions, outcomes)
+- Buffered writes to ClickHouse for high throughput
+- Security alerts materialized view for monitoring
+- Query and stats APIs for dashboards
+- Non-blocking design (failures don't break main flow)
 
-**Files to modify:**
-- `apps/worker/src/audit.ts` (create)
-- `apps/worker/src/api.ts` (add audit calls)
-- `k8s/base/clickhouse/init-configmap.yaml` (add audit_log table)
+**Files created:**
+- `apps/worker/src/services/audit.ts` - Full audit service
+- Updated `infra/clickhouse/init/001_schema.sql` - Added audit_log table and security_alerts_mv
+
+**Configuration (via environment):**
+- `AUDIT_ENABLED` - Enable/disable audit logging
+- `AUDIT_LOG_TO_CONSOLE` - Also log to console (for debugging)
+- `AUDIT_BATCH_SIZE` - Events to buffer before flush (default: 100)
+- `AUDIT_FLUSH_INTERVAL_MS` - Flush interval (default: 5s)
+
+**Event Categories:**
+- `auth` - Login, logout, password changes
+- `batch` - Create, start, pause, resume, cancel, delete
+- `config` - Send config CRUD
+- `api_key` - Create, revoke, usage
+- `webhook` - Config changes, signature validation
+- `admin` - User management
+- `security` - Rate limits, invalid tokens, permission denied
 
 ---
 
@@ -565,16 +551,16 @@ spec:
 | 1. Webhook Strict Validation | Medium | Low | ⭐⭐⭐⭐⭐ | 1h | ✅ |
 | 2. Graceful Error Messages | Medium | Low | ⭐⭐⭐⭐⭐ | 2h | ✅ |
 | 3. Request Validation | Medium | Low | ⭐⭐⭐⭐ | 2-3h | ✅ |
-| 4. Stuck Batch Detector | High | Low | ⭐⭐⭐⭐⭐ | 45m | ⬜ |
-| 5. Webhook Timeout/Retry | Medium | Low | ⭐⭐⭐⭐ | 2-3h | ⬜ |
-| 6. Enable TLS for NATS | High | Low | ⭐⭐⭐⭐⭐ | 2-4h | ⬜ |
-| 7. Audit Logging | High | Low | ⭐⭐⭐⭐⭐ | 4-6h | ⬜ |
+| 4. Stuck Batch Detector | High | Low | ⭐⭐⭐⭐⭐ | 45m | ✅ |
+| 5. Webhook Timeout/Retry | Medium | Low | ⭐⭐⭐⭐ | 2-3h | ✅ |
+| 6. Enable TLS for NATS | High | Low | ⭐⭐⭐⭐⭐ | 2-4h | ✅ |
+| 7. Audit Logging | High | Low | ⭐⭐⭐⭐⭐ | 4-6h | ✅ |
 | 8. ClickHouse Backup | High | Low | ⭐⭐⭐⭐⭐ | 3-4h | ✅ |
 | 9. Runbook Documentation | Medium | Low | ⭐⭐⭐⭐ | 3-4h | ⬜ |
 | **Critical Path** |
 | 10. Cold Storage Archive | Critical | Medium | ⭐⭐⭐⭐⭐ | 1-2d | ✅ |
-| 11. Sealed Secrets | High | Medium | ⭐⭐⭐⭐ | 4-6h | ⬜ |
-| 12. Queue-Based Autoscaling | Critical | Medium | ⭐⭐⭐⭐⭐ | 4-6h | ⬜ |
+| 11. Sealed Secrets | High | Medium | ⭐⭐⭐⭐ | 4-6h | ✅ |
+| 12. Queue-Based Autoscaling | Critical | Medium | ⭐⭐⭐⭐⭐ | 4-6h | ✅ |
 | 13. Monitoring Stack | Critical | High | ⭐⭐⭐⭐⭐ | 2-3d | ⬜ |
 | 14. NetworkPolicy & RBAC | High | Medium | ⭐⭐⭐⭐ | 4-6h | ⬜ |
 | 15. DR Plan Documentation | High | Medium | ⭐⭐⭐⭐ | 1d | ⬜ |
@@ -596,13 +582,13 @@ spec:
 1. ✅ Webhook Strict Validation (1h) - COMPLETED
 2. ✅ Graceful Error Messages (2h) - COMPLETED
 3. ✅ Request Validation Middleware (3h) - COMPLETED
-4. ⬜ Stuck Batch Detector (45m)
-5. ⬜ ClickHouse Backup Script (4h)
+4. ✅ Stuck Batch Detector (45m) - COMPLETED (2026-01-17)
+5. ✅ ClickHouse Backup Script (4h) - COMPLETED
 
 **Day 3-5:**
-6. ⬜ Webhook Timeout/Retry (3h)
-7. ⬜ Enable TLS for NATS (4h)
-8. ⬜ Audit Logging (6h)
+6. ✅ Webhook Timeout/Retry (3h) - COMPLETED (2026-01-17)
+7. ✅ Enable TLS for NATS (4h) - COMPLETED (2026-01-17)
+8. ✅ Audit Logging (6h) - COMPLETED (2026-01-17)
 9. ⬜ Runbook Documentation (4h)
 
 **Outcome:** 9 improvements, ~27 hours effort, dramatically improved security posture
@@ -726,16 +712,16 @@ Track these for future cleanup:
 
 ## Status Tracking
 
-- [ ] Week 1 Quick Wins (4/9 completed - 44%)
-- [ ] Week 2-3 Critical Infrastructure (1/6 completed)
+- [x] Week 1 Quick Wins (8/9 completed - 89%)
+- [x] Week 2-3 Critical Infrastructure (3/6 completed - 50%)
 - [ ] Month 2 Hardening (0/4 completed)
 - [ ] Month 3 Resilience (0/4 completed)
 
 **Total Items:** 23
-**Completed:** 5
-**Progress:** 22%
+**Completed:** 11
+**Progress:** 48%
 
-**Last Updated:** 2026-01-13
+**Last Updated:** 2026-01-17
 **Next Review:** 2026-01-20
 
 ---
