@@ -260,6 +260,20 @@ async function sealSecrets(secrets: EnvSecrets): Promise<void> {
 
   console.log(`${colors.green}✓${colors.reset} Created: k8s/base/clickhouse/sealed-b2-secret.yaml`);
 
+  console.log(`${colors.cyan}→${colors.reset} Encrypting Loki B2 secrets...`);
+
+  await sealSecret(
+    'loki-b2-credentials',
+    'batchsender',
+    {
+      'access-key-id': secrets.B2_KEY_ID,
+      'secret-access-key': secrets.B2_APP_KEY,
+    },
+    'k8s/monitoring/sealed-loki-b2-credentials.yaml'
+  );
+
+  console.log(`${colors.green}✓${colors.reset} Created: k8s/monitoring/sealed-loki-b2-credentials.yaml`);
+
   console.log(`${colors.cyan}→${colors.reset} Encrypting Web App secrets...`);
 
   await sealSecret(
@@ -318,6 +332,7 @@ function showSummary(): void {
   console.log('  • k8s/base/worker/sealed-secrets.yaml');
   console.log('  • k8s/base/clickhouse/sealed-secrets.yaml');
   console.log('  • k8s/base/clickhouse/sealed-b2-secret.yaml');
+  console.log('  • k8s/monitoring/sealed-loki-b2-credentials.yaml');
   console.log('  • k8s/base/web/sealed-secrets.yaml');
   console.log('  • k8s/monitoring/sealed-grafana-secret.yaml');
   console.log('  • k8s/monitoring/sealed-prometheus-auth.yaml');
