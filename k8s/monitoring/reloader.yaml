@@ -3,16 +3,12 @@ kind: ServiceAccount
 metadata:
   name: reloader
   namespace: batchsender
-  annotations:
-    argocd.argoproj.io/sync-wave: "-1"
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: reloader-role
-  annotations:
-    argocd.argoproj.io/sync-wave: "-1"
 rules:
 - apiGroups: [""]
   resources: ["secrets", "configmaps"]
@@ -26,8 +22,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: reloader-rolebinding
-  annotations:
-    argocd.argoproj.io/sync-wave: "-1"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -43,8 +37,6 @@ kind: Deployment
 metadata:
   name: reloader
   namespace: batchsender
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
 spec:
   replicas: 1
   selector:

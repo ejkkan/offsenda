@@ -5,8 +5,6 @@ metadata:
   namespace: batchsender
   labels:
     app: worker
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
 spec:
   # Replicas managed by HPA - do not set replicas here
   selector:
