@@ -21,28 +21,8 @@ spec:
 
       containers:
       - name: migrate
-        image: ghcr.io/ejkkan/offsenda-worker:latest
+        image: ghcr.io/ejkkan/offsenda-migration:latest
         imagePullPolicy: Always
-
-        command:
-        - sh
-        - -c
-        - |
-          set -e
-
-          echo "=== Database Migration ==="
-          echo "Starting at $(date)"
-
-          # Change to db package directory
-          cd /app/packages/db
-
-          # Apply schema changes using drizzle-kit push
-          echo "Applying schema changes..."
-          pnpm drizzle-kit push
-
-          echo "=== Migration Complete ==="
-          echo "Finished at $(date)"
-
         env:
         - name: DATABASE_URL
           valueFrom:

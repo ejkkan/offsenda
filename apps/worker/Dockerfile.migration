@@ -1,0 +1,34 @@
+FROM node:20-alpine AS base
+
+RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+
+FROM base AS builder
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/db/package.json ./packages/db/
+
+# Install ALL dependencies (including devDependencies for drizzle-kit)
+RUN pnpm install --frozen-lockfile
+
+COPY packages/db ./packages/db
+
+# Build the db package
+RUN pnpm --filter=@batchsender/db build
+
+FROM base AS runner
+WORKDIR /app
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 migration
+
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/pnpm-lock.yaml ./
+COPY --from=builder /app/pnpm-workspace.yaml ./
+
+COPY --from=builder /app/packages/db ./packages/db
+COPY --from=builder /app/node_modules ./node_modules
+
+USER migration
+
+CMD ["sh", "-c", "cd /app/packages/db && pnpm drizzle-kit push"]

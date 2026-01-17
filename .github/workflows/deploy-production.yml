@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'apps/worker/**'
+      - 'packages/db/**'
       - '.github/workflows/deploy-production.yml'
   workflow_dispatch:
 
@@ -46,6 +47,26 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata for migration image
+        id: meta-migration
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/ejkkan/offsenda-migration
+          tags: |
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push migration image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/worker/Dockerfile.migration
+          push: true
+          tags: ${{ steps.meta-migration.outputs.tags }}
+          labels: ${{ steps.meta-migration.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
