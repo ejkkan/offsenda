@@ -660,6 +660,9 @@ spec:
         - name: grafana-logs-dashboard
           mountPath: /var/lib/grafana/dashboards/logs.json
           subPath: logs.json
+        - name: grafana-loadtest-dashboard
+          mountPath: /var/lib/grafana/dashboards/loadtest.json
+          subPath: loadtest.json
         - name: grafana-storage
           mountPath: /var/lib/grafana
         resources:
@@ -697,6 +700,9 @@ spec:
       - name: grafana-logs-dashboard
         configMap:
           name: grafana-logs-dashboard
+      - name: grafana-loadtest-dashboard
+        configMap:
+          name: grafana-loadtest-dashboard
       - name: grafana-storage
         persistentVolumeClaim:
           claimName: grafana-pvc
