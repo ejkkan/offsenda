@@ -1,6 +1,7 @@
 import type { Module } from "./types.js";
 import { EmailModule } from "./email-module.js";
 import { WebhookModule } from "./webhook-module.js";
+import { SmsModule } from "./sms-module.js";
 
 /**
  * Module registry - maps module types to implementations
@@ -8,6 +9,7 @@ import { WebhookModule } from "./webhook-module.js";
 const modules: Record<string, Module> = {
   email: new EmailModule(),
   webhook: new WebhookModule(),
+  sms: new SmsModule(),
 };
 
 /**

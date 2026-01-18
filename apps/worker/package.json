@@ -21,7 +21,13 @@
     "test:rate:enterprise": "SES_RATE_LIMIT=500 MOCK_RATE_LIMIT=500 pnpm test:e2e",
     "test:rate:no-limit": "SES_RATE_LIMIT=999999 MOCK_RATE_LIMIT=999999 pnpm test:e2e",
     "test:rate:all": "./scripts/test-rate-limits.sh all",
-    "load-test": "tsx scripts/nats-load-test.ts"
+    "load-test": "tsx scripts/nats-load-test.ts",
+    "k6:smoke": "k6 run k6/batch-create.js",
+    "k6:load": "k6 run -e SCENARIO=load k6/batch-create.js",
+    "k6:stress": "k6 run k6/stress-test.js",
+    "k6:flow": "k6 run k6/batch-flow.js",
+    "k6:webhook": "k6 run k6/webhook-throughput.js",
+    "k6:webhook:stress": "k6 run -e SCENARIO=stress k6/webhook-throughput.js"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.500.0",

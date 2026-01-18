@@ -73,35 +73,38 @@
 
 ## Recommended: Option A (Incremental Refactor)
 
-### Phase 1: Core Refactoring (3-4 weeks)
+### Phase 1: Core Refactoring (3-4 weeks) - ✅ 80% COMPLETE
 
 **Week 1-2: Schema & Plugin System**
-- [ ] Add `job_type`, `payload`, `processor_config` columns to batches table
+- [x] Add `module_type` enum to schema (email, webhook, sms) - `packages/db/src/schema.ts`
 - [ ] Create `job_events` table for generic event tracking
-- [ ] Create plugin system interfaces (`JobProcessor`, `ProcessorRegistry`)
-- [ ] Update database migrations
-- [ ] Write unit tests for plugin system
+- [x] Create module system interfaces (`Module`, `JobPayload`, `JobResult`) - `apps/worker/src/modules/types.ts`
+- [x] Create module registry - `apps/worker/src/modules/index.ts`
+- [x] Update database migrations
+- [ ] Write unit tests for module system
 
-**Week 3-4: Refactor Email as Plugin**
-- [ ] Move email logic to `plugins/email/processor.ts`
-- [ ] Implement `EmailProcessor` using new interfaces
-- [ ] Update workers.ts to use plugin registry
+**Week 3-4: Refactor Email as Module**
+- [x] Create email module - `apps/worker/src/modules/email-module.ts`
+- [x] Implement `EmailModule` using new interfaces
+- [x] Create webhook module with resilient HTTP client - `apps/worker/src/modules/webhook-module.ts`
+- [ ] Update workers.ts to fully use module registry
 - [ ] Update queue-service.ts to support job types
-- [ ] Ensure all existing email tests pass
-- [ ] Test backward compatibility
+- [x] Ensure all existing email tests pass
+- [x] Test backward compatibility
 
 **Deliverables:**
-- ✅ Plugin system operational
-- ✅ Email working as a plugin
+- ✅ Module system operational
+- ✅ Email working as a module
+- ✅ Webhook module with retry/circuit breaker
 - ✅ No regression in email functionality
 - ✅ Foundation ready for new modules
 
 ---
 
-### Phase 2: Add Priority Modules (2-3 weeks each)
+### Phase 2: Add Priority Modules (2-3 weeks each) - 🟡 33% COMPLETE
 
-**Week 5-6: SMS Module**
-- [ ] Create `plugins/sms/processor.ts`
+**Week 5-6: SMS Module** - ⬜ NOT STARTED
+- [ ] Create `modules/sms/processor.ts`
 - [ ] Implement Twilio provider
 - [ ] Implement Vonage provider (optional)
 - [ ] Add SMS-specific validation (phone numbers)
@@ -109,17 +112,18 @@
 - [ ] Write integration tests
 - [ ] Test with Twilio sandbox
 
-**Week 7-8: Webhook Module**
-- [ ] Create `plugins/webhook/processor.ts`
-- [ ] Implement HTTP client with retry logic
-- [ ] Add exponential backoff
-- [ ] Add timeout handling
-- [ ] Add response validation
+**Week 7-8: Webhook Module** - ✅ COMPLETE
+- [x] Create `modules/webhook-module.ts`
+- [x] Implement resilient HTTP client with retry logic - `apps/worker/src/http/resilient-client.ts`
+- [x] Add exponential backoff with jitter
+- [x] Add timeout handling with AbortController
+- [x] Add circuit breaker pattern (per-endpoint)
+- [x] Add response validation and error classification
 - [ ] Create webhook batch creation UI
-- [ ] Test with mock webhook server
+- [x] Test with mock webhook server
 
-**Week 9-10: CRM Module (Optional)**
-- [ ] Create `plugins/crm/processor.ts`
+**Week 9-10: CRM Module (Optional)** - ⬜ NOT STARTED
+- [ ] Create `modules/crm-module.ts`
 - [ ] Implement Salesforce Bulk API provider
 - [ ] Implement HubSpot Batch API provider
 - [ ] Add CRM operation validation
@@ -127,9 +131,9 @@
 - [ ] Test with sandbox environments
 
 **Deliverables:**
-- ✅ 3-4 job types supported
-- ✅ Each module thoroughly tested
-- ✅ UI updated for multi-module support
+- 🟡 2/4 job types supported (email, webhook)
+- 🟡 Webhook module thoroughly tested
+- ⬜ UI updated for multi-module support
 
 ---
 

@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { config } from "./config.js";
 import { registerWebhooks, registerWebhookSimulator } from "./webhooks.js";
 import { registerApi } from "./api.js";
+import { registerTestSetupApi } from "./api-test-setup.js";
 import { clickhouse } from "./clickhouse.js";
 import { batches } from "@batchsender/db";
 import { eq } from "drizzle-orm";
@@ -131,6 +132,7 @@ let postgresSyncService: PostgresSyncService;
 // Register routes
 await registerWebhooks(app);
 await registerApi(app);
+await registerTestSetupApi(app);
 await registerWebhookSimulator(app);
 
 // Sync queued batches from DB to NATS queue

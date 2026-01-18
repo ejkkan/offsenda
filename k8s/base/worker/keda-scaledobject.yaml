@@ -8,8 +8,8 @@ spec:
     name: worker
   minReplicaCount: 2
   maxReplicaCount: 50
-  pollingInterval: 5  # Check queue every 5 seconds
-  cooldownPeriod: 30   # Wait 30s before scaling down
+  pollingInterval: 2  # Check queue every 2 seconds (faster scale-up)
+  cooldownPeriod: 15  # Wait 15s before scaling down (faster reactions)
   triggers:
   # Use Prometheus scaler to watch the email queue depth
   # This reads from the worker's /metrics endpoint via Prometheus

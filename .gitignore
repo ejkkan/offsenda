@@ -32,6 +32,8 @@ pnpm-debug.log*
 
 # Testing
 coverage
+k6/results/*.json
+test-reports/
 
 # Terraform
 **/.terraform/

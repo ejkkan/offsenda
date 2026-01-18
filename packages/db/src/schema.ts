@@ -243,7 +243,7 @@ export type WebhookModuleConfig = {
 };
 
 export type SmsModuleConfig = {
-  provider: "twilio" | "aws-sns";
+  provider: "twilio" | "aws-sns" | "mock";
   accountSid?: string;
   authToken?: string;
   apiKey?: string;

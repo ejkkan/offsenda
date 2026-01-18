@@ -406,6 +406,11 @@ export class PostgresSyncService {
 
   /**
    * Check if batch is complete and update PostgreSQL status
+   *
+   * Note: Completion is based solely on Dragonfly counters (sent + failed >= total).
+   * We do NOT wait for pending syncs to complete - background sync will continue
+   * processing recipients after the batch is marked complete. This prevents a race
+   * condition at high throughput where recipients are added faster than sync can process.
    */
   private async checkAndCompleteBatch(
     batchId: string,
@@ -413,13 +418,6 @@ export class PostgresSyncService {
   ): Promise<void> {
     const isComplete = await hotState.isBatchComplete(batchId);
     if (!isComplete) {
-      return;
-    }
-
-    // Check if there are still pending syncs
-    const pendingIds = await hotState.getPendingSyncRecipients(batchId, 1);
-    if (pendingIds.length > 0) {
-      // Still have pending syncs, don't mark complete yet
       return;
     }
 

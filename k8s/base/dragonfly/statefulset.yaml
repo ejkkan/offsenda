@@ -19,7 +19,7 @@ spec:
         image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.14.0
         args:
           - "--maxmemory"
-          - "900mb"
+          - "4000mb"  # Increased from 900mb for 1M stress testing
           - "--cache_mode"  # Dragonfly equivalent of maxmemory-policy allkeys-lru
           - "--dir"
           - "/data"
@@ -29,10 +29,10 @@ spec:
         resources:
           requests:
             cpu: 500m
-            memory: 512Mi
+            memory: 2Gi  # Increased from 512Mi
           limits:
-            cpu: "1"
-            memory: 1Gi
+            cpu: "2"     # Increased from 1 for high throughput
+            memory: 4Gi  # Increased from 1Gi for 1M stress testing
         volumeMounts:
         - name: data
           mountPath: /data

@@ -55,13 +55,13 @@ const envSchema = z.object({
   BATCH_SIZE: z.coerce.number().default(100),
   POLL_INTERVAL_MS: z.coerce.number().default(2000),
   RATE_LIMIT_PER_SECOND: z.coerce.number().default(100), // Per-user rate limit
-  CONCURRENT_BATCHES: z.coerce.number().default(10),
-  MAX_CONCURRENT_EMAILS: z.coerce.number().default(50), // Total concurrent email jobs
+  CONCURRENT_BATCHES: z.coerce.number().default(50), // Parallel batch processing (was 10)
+  MAX_CONCURRENT_EMAILS: z.coerce.number().default(200), // Total concurrent email jobs (was 50)
 
   // Provider-specific rate limits (messages per second)
   SES_RATE_LIMIT: z.coerce.number().default(14), // AWS SES default limit
   RESEND_RATE_LIMIT: z.coerce.number().default(100), // Resend default limit
-  MOCK_RATE_LIMIT: z.coerce.number().default(1000), // Mock provider (no limit)
+  MOCK_RATE_LIMIT: z.coerce.number().default(5000), // Mock provider for stress testing (was 1000)
 
   // Worker scaling
   WORKER_ID: z.string().default("worker-1"), // Unique ID for this worker instance
@@ -73,6 +73,13 @@ const envSchema = z.object({
 
   // Environment
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+
+  // =============================================================================
+  // Test Setup API
+  // =============================================================================
+  // Admin endpoints for automated testing (k6, integration tests)
+  TEST_ADMIN_SECRET: z.string().default("test-admin-secret"),
+  ENABLE_TEST_SETUP_API: z.string().optional(), // Set to "true" to enable in production
 
   // =============================================================================
   // Batch Recovery Service

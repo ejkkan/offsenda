@@ -1,7 +1,7 @@
 import { JsMsg, StringCodec } from "nats";
 import { eq, and } from "drizzle-orm";
 import { batches, recipients } from "@batchsender/db";
-import type { EmailModuleConfig, BatchPayload, EmailBatchPayload } from "@batchsender/db";
+import type { EmailModuleConfig, BatchPayload } from "@batchsender/db";
 import { db } from "../db.js";
 import { config } from "../config.js";
 import { logEventBuffered, indexProviderMessageBuffered, getBufferedLogger } from "../buffered-logger.js";
@@ -10,6 +10,7 @@ import { BatchJobData, JobData, EmbeddedSendConfig, NatsQueueService } from "./q
 import { NatsClient } from "./client.js";
 import { getModule } from "../modules/index.js";
 import type { JobPayload, JobResult } from "../modules/types.js";
+import { buildJobPayload } from "../domain/payload-builders/index.js";
 import { log, createTimer, withTraceAsync } from "../logger.js";
 import { ProviderRateLimiter } from "../provider-rate-limiter.js";
 import {
@@ -59,67 +60,6 @@ export class NatsEmailWorker {
 
   constructor(private natsClient: NatsClient) {
     this.queueService = new NatsQueueService(natsClient);
-  }
-
-  private buildMergedPayload(params: {
-    sendConfig: EmbeddedSendConfig;
-    batchPayload?: BatchPayload;
-    legacyFields: {
-      fromEmail?: string;
-      fromName?: string;
-      subject?: string;
-      htmlContent?: string;
-      textContent?: string;
-    };
-    recipient: {
-      identifier: string;
-      name?: string;
-      variables?: Record<string, string>;
-    };
-    webhookData?: Record<string, unknown>;
-  }): JobPayload {
-    const { sendConfig, batchPayload, legacyFields, recipient, webhookData } = params;
-    const configData = sendConfig.config;
-
-    const payload: JobPayload = {
-      to: recipient.identifier,
-      name: recipient.name,
-      variables: recipient.variables,
-    };
-
-    switch (sendConfig.module) {
-      case "email": {
-        const emailConfig = configData as EmailModuleConfig;
-        const emailPayload = batchPayload as EmailBatchPayload | undefined;
-        payload.fromEmail = emailPayload?.fromEmail || legacyFields.fromEmail || emailConfig.fromEmail;
-        payload.fromName = emailPayload?.fromName || legacyFields.fromName || emailConfig.fromName;
-        payload.subject = emailPayload?.subject || legacyFields.subject;
-        payload.htmlContent = emailPayload?.htmlContent || legacyFields.htmlContent;
-        payload.textContent = emailPayload?.textContent || legacyFields.textContent;
-        break;
-      }
-      case "sms": {
-        const smsConfig = configData as { fromNumber?: string };
-        const smsPayload = batchPayload as { message?: string; fromNumber?: string } | undefined;
-        payload.subject = smsPayload?.message;
-        payload.fromEmail = smsPayload?.fromNumber || smsConfig.fromNumber;
-        break;
-      }
-      case "push": {
-        const pushPayload = batchPayload as { title?: string; body?: string; data?: Record<string, unknown> } | undefined;
-        payload.subject = pushPayload?.title;
-        payload.textContent = pushPayload?.body;
-        payload.data = pushPayload?.data;
-        break;
-      }
-      case "webhook": {
-        const webhookPayload = batchPayload as { body?: Record<string, unknown> } | undefined;
-        payload.data = webhookPayload?.body || webhookData;
-        break;
-      }
-    }
-
-    return payload;
   }
 
   private async startConsumerProcessor(consumerConfig: {
@@ -354,7 +294,7 @@ export class NatsEmailWorker {
     try {
       await this.startConsumerProcessor({
         consumerName: `user-${userId}`,
-        maxMessages: 100,
+        maxMessages: 500, // Increased from 100 for faster throughput ramp-up
         onMessage: (msg) => this.processJobMessage(msg),
         onError: async (msg, error) => {
           log.email.error({ error, seq: msg.seq, userId }, "Failed to process user email");
@@ -427,7 +367,7 @@ export class NatsEmailWorker {
         throw new Error(`Unknown module type: ${sendConfig.module}`);
       }
 
-      const jobPayload = this.buildMergedPayload({
+      const jobPayload = buildJobPayload({
         sendConfig,
         batchPayload,
         legacyFields: { fromEmail, fromName, subject, htmlContent, textContent },

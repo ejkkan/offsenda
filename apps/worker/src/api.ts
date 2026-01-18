@@ -81,14 +81,15 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
 
   // Auth middleware
   app.addHook("preHandler", async (request, reply) => {
-    // Skip auth for health check, metrics, webhooks, and test webhook endpoint
+    // Skip auth for health check, metrics, webhooks, test endpoints, and test reports
     // Support both /metrics and /api/metrics for Prometheus compatibility
     if (
       request.url === "/health" ||
       request.url.startsWith("/metrics") ||
       request.url.startsWith("/api/metrics") ||
       request.url.startsWith("/webhooks") ||
-      request.url.startsWith("/api/test-webhook")
+      request.url.startsWith("/api/test-webhook") ||
+      request.url.startsWith("/api/test-reports")
     ) {
       return;
     }
@@ -1061,5 +1062,159 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
       return reply.send({ circuits: result });
     }
     return reply.send({ circuits: {} });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEST REPORTS API (AI-consumable test analytics)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const { existsSync, readFileSync, readdirSync, statSync } = await import("fs");
+  const { join } = await import("path");
+  const { TEST_REPORT_PATHS } = await import("./testing/index.js");
+
+  const reportsRoot = join(process.cwd(), TEST_REPORT_PATHS.root);
+
+  // GET /api/test-reports/latest - Get most recent test report (any type)
+  app.get("/api/test-reports/latest", async (request, reply) => {
+    const latestPath = join(process.cwd(), TEST_REPORT_PATHS.latest);
+    if (!existsSync(latestPath)) {
+      return reply.status(404).send({ error: "No test reports found" });
+    }
+    const report = JSON.parse(readFileSync(latestPath, "utf-8"));
+    return reply.send(report);
+  });
+
+  // GET /api/test-reports/latest/:type - Get most recent report by type
+  app.get("/api/test-reports/latest/:type", async (request, reply) => {
+    const { type } = request.params as { type: string };
+    const validTypes = ["load", "stress", "integration", "e2e", "unit", "smoke"];
+    if (!validTypes.includes(type)) {
+      return reply.status(400).send({ error: `Invalid type. Must be one of: ${validTypes.join(", ")}` });
+    }
+    const typePath = join(process.cwd(), TEST_REPORT_PATHS.latestByType(type as any));
+    if (!existsSync(typePath)) {
+      return reply.status(404).send({ error: `No ${type} test reports found` });
+    }
+    const report = JSON.parse(readFileSync(typePath, "utf-8"));
+    return reply.send(report);
+  });
+
+  // GET /api/test-reports/history - List all historical reports
+  app.get("/api/test-reports/history", async (request, reply) => {
+    const historyDir = join(reportsRoot, "history");
+    if (!existsSync(historyDir)) {
+      return reply.send({ reports: [] });
+    }
+
+    const reports: { date: string; runId: string; testType: string; status: string; name: string }[] = [];
+
+    const dates = readdirSync(historyDir).filter((d) => statSync(join(historyDir, d)).isDirectory());
+    for (const date of dates.sort().reverse()) {
+      const dateDir = join(historyDir, date);
+      const files = readdirSync(dateDir).filter((f) => f.endsWith(".json"));
+      for (const file of files) {
+        try {
+          const report = JSON.parse(readFileSync(join(dateDir, file), "utf-8"));
+          reports.push({
+            date,
+            runId: report.runId,
+            testType: report.testType,
+            status: report.status,
+            name: report.name,
+          });
+        } catch {
+          // Skip invalid files
+        }
+      }
+    }
+
+    return reply.send({ reports: reports.slice(0, 100) }); // Limit to 100 most recent
+  });
+
+  // GET /api/test-reports/:runId - Get specific report by runId
+  app.get("/api/test-reports/:runId", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    const historyDir = join(reportsRoot, "history");
+    if (!existsSync(historyDir)) {
+      return reply.status(404).send({ error: "Report not found" });
+    }
+
+    // Search through history directories
+    const dates = readdirSync(historyDir).filter((d) => statSync(join(historyDir, d)).isDirectory());
+    for (const date of dates) {
+      const reportPath = join(historyDir, date, `${runId}.json`);
+      if (existsSync(reportPath)) {
+        const report = JSON.parse(readFileSync(reportPath, "utf-8"));
+        return reply.send(report);
+      }
+    }
+
+    return reply.status(404).send({ error: "Report not found" });
+  });
+
+  // GET /api/test-reports/baseline/:type - Get baseline for comparison
+  app.get("/api/test-reports/baseline/:type", async (request, reply) => {
+    const { type } = request.params as { type: string };
+    const baselinePath = join(process.cwd(), TEST_REPORT_PATHS.baseline(type as any));
+    if (!existsSync(baselinePath)) {
+      return reply.status(404).send({ error: `No baseline for ${type} tests` });
+    }
+    const report = JSON.parse(readFileSync(baselinePath, "utf-8"));
+    return reply.send(report);
+  });
+
+  // GET /api/test-reports/summary - AI-friendly summary of recent test state
+  app.get("/api/test-reports/summary", async (request, reply) => {
+    const summary: {
+      latestByType: Record<string, { status: string; runId: string; date: string; keyFindings: string[] }>;
+      recentFailures: { runId: string; testType: string; date: string; issues: number }[];
+      trend: { direction: "improving" | "degrading" | "stable"; basedOn: number };
+    } = {
+      latestByType: {},
+      recentFailures: [],
+      trend: { direction: "stable", basedOn: 0 },
+    };
+
+    const types = ["load", "stress", "integration", "e2e", "smoke"];
+    let passCount = 0;
+    let failCount = 0;
+
+    for (const type of types) {
+      const typePath = join(process.cwd(), TEST_REPORT_PATHS.latestByType(type as any));
+      if (existsSync(typePath)) {
+        try {
+          const report = JSON.parse(readFileSync(typePath, "utf-8"));
+          summary.latestByType[type] = {
+            status: report.status,
+            runId: report.runId,
+            date: report.completedAt,
+            keyFindings: report.summary?.keyFindings || [],
+          };
+          if (report.status === "passed") passCount++;
+          else failCount++;
+
+          if (report.status === "failed" || report.status === "degraded") {
+            summary.recentFailures.push({
+              runId: report.runId,
+              testType: type,
+              date: report.completedAt,
+              issues: report.issues?.length || 0,
+            });
+          }
+        } catch {
+          // Skip invalid files
+        }
+      }
+    }
+
+    const total = passCount + failCount;
+    if (total > 0) {
+      summary.trend = {
+        direction: passCount > failCount * 2 ? "improving" : failCount > passCount ? "degrading" : "stable",
+        basedOn: total,
+      };
+    }
+
+    return reply.send(summary);
   });
 }

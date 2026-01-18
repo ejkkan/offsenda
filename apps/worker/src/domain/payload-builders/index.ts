@@ -22,7 +22,7 @@ export interface SendConfig {
   id: string;
   module: ModuleType;
   config: Record<string, unknown>;
-  rateLimit?: { perSecond: number };
+  rateLimit?: { perSecond?: number; perMinute?: number; dailyLimit?: number } | null;
 }
 
 export interface PayloadBuildContext {

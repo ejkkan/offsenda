@@ -33,11 +33,11 @@ spec:
             name: worker-secrets
         resources:
           requests:
-            cpu: 100m
-            memory: 256Mi
+            cpu: 200m       # Increased from 100m for higher throughput
+            memory: 512Mi   # Increased from 256Mi
           limits:
-            cpu: 500m
-            memory: 512Mi
+            cpu: "1"        # Increased from 500m for 1M stress testing
+            memory: 1Gi     # Increased from 512Mi for 1M stress testing
         readinessProbe:
           httpGet:
             path: /health

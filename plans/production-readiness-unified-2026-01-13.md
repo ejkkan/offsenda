@@ -3,7 +3,7 @@
 **Created:** 2026-01-13
 **Status:** 🟢 95% Complete
 **Priority:** CRITICAL - Required before production launch
-**Last Updated:** 2026-01-17 (Updated after NATS TLS deployment)
+**Last Updated:** 2026-01-18 (Updated after NATS TLS deployment)
 
 ---
 
@@ -724,28 +724,28 @@ Track these for future cleanup:
 
 - [x] Week 1 Quick Wins (9/9 completed - 100%)
 - [x] Week 2-3 Critical Infrastructure (6/6 completed - 100%)
-- [ ] Month 2 Hardening (0/4 completed)
+- [x] Month 2 Hardening (2/4 completed - 50%)
 - [ ] Month 3 Resilience (0/4 completed)
 
 **Total Items:** 24
-**Completed:** 17
-**Progress:** 71%
+**Completed:** 19
+**Progress:** 79%
 
-### Completed Today (2026-01-17):
+### Recently Completed:
 - ✅ **NATS TLS** - Deployed to local and production
 - ✅ **NetworkPolicy & RBAC** - Security hardening for all pods
 - ✅ **DR Plan Documentation** - Full disaster recovery guide
 - ✅ **Runbook Documentation** - 5 operational runbooks
 - ✅ **Automate DB Migrations** - K8s Job for schema updates
+- ✅ **API Rate Limiting** - IP-based sliding window with Dragonfly (`apps/worker/src/rate-limiter.ts`)
+- ✅ **Load Testing** - Full stress test with presets up to 400k emails (`scripts/load-test.ts`)
 
 ### Remaining (Medium Priority - Month 2+):
 1. ⬜ Multi-Region Deployment (2-4 weeks)
 2. ⬜ Encryption at Rest (1 week)
-3. ⬜ API Gateway / Rate Limiting (1-2 weeks)
-4. ⬜ Load Testing & Benchmarking (1 week)
-5. ⬜ Feature Flags System (1 week)
+3. ⬜ Feature Flags System (1 week)
 
-**Last Updated:** 2026-01-17
+**Last Updated:** 2026-01-18
 **Next Review:** 2026-01-24
 
 ---
