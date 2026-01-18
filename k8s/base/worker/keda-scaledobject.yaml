@@ -11,11 +11,12 @@ spec:
   pollingInterval: 5  # Check queue every 5 seconds
   cooldownPeriod: 30   # Wait 30s before scaling down
   triggers:
-  - type: nats-jetstream
+  # Use Prometheus scaler to watch the email queue depth
+  # This reads from the worker's /metrics endpoint via Prometheus
+  - type: prometheus
     metadata:
-      natsServerMonitoringEndpoint: "nats.batchsender.svc:8222"
-      account: "$G"
-      stream: "email-system"
-      consumer: "batch-processor"
-      lagThreshold: "1000"  # Scale up when >1000 pending messages per pod
-      activationLagThreshold: "100"  # Activate scaling when >100 messages
+      serverAddress: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
+      metricName: nats_queue_depth_email_processor
+      query: sum(nats_queue_depth_email_processor)
+      threshold: "1000"  # Scale up when >1000 pending messages per pod
+      activationThreshold: "100"  # Activate scaling when >100 messages
