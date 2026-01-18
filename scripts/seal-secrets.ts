@@ -35,6 +35,7 @@ interface EnvSecrets {
   GRAFANA_ADMIN_PASSWORD: string;
   PROMETHEUS_ADMIN_PASSWORD: string;
   NEON_DB_PASSWORD: string;
+  TEST_ADMIN_SECRET: string;
 }
 
 /**
@@ -141,6 +142,7 @@ function validateSecrets(secrets: Partial<EnvSecrets>): EnvSecrets {
     'GRAFANA_ADMIN_PASSWORD',
     'PROMETHEUS_ADMIN_PASSWORD',
     'NEON_DB_PASSWORD',
+    'TEST_ADMIN_SECRET',
   ];
 
   const missing: string[] = [];
@@ -224,6 +226,7 @@ async function sealSecrets(secrets: EnvSecrets): Promise<void> {
       RESEND_API_KEY: secrets.RESEND_API_KEY,
       WEBHOOK_SECRET: secrets.WEBHOOK_SECRET,
       CLICKHOUSE_PASSWORD: secrets.CLICKHOUSE_PASSWORD,
+      TEST_ADMIN_SECRET: secrets.TEST_ADMIN_SECRET,
     },
     'k8s/base/worker/sealed-secrets.yaml'
   );
