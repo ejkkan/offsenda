@@ -68,41 +68,9 @@ jobs:
 
       - name: Trigger ArgoCD sync
         run: |
-          # Force ArgoCD to refresh and sync
-          # This triggers PreSync hooks (migrations) before deploying
+          # Force ArgoCD to refresh - don't wait, ArgoCD handles the rest
           kubectl annotate application batchsender -n argocd \
             argocd.argoproj.io/refresh=hard --overwrite
-
-          # Wait for sync to complete
-          echo "Waiting for ArgoCD sync..."
-          for i in {1..60}; do
-            STATUS=$(kubectl get application batchsender -n argocd \
-              -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
-            HEALTH=$(kubectl get application batchsender -n argocd \
-              -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
-            PHASE=$(kubectl get application batchsender -n argocd \
-              -o jsonpath='{.status.operationState.phase}' 2>/dev/null || echo "Unknown")
-
-            echo "[$i/60] Sync: $STATUS | Health: $HEALTH | Phase: $PHASE"
-
-            if [ "$STATUS" = "Synced" ] && [ "$HEALTH" = "Healthy" ]; then
-              echo "✅ Sync complete!"
-              exit 0
-            fi
-
-            if [ "$PHASE" = "Failed" ] || [ "$PHASE" = "Error" ]; then
-              echo "❌ Sync failed!"
-              kubectl get application batchsender -n argocd -o yaml | grep -A10 "operationState:"
-              exit 1
-            fi
-
-            sleep 10
-          done
-          echo "❌ Sync timed out after 10 minutes"
-          exit 1
-
-      - name: Deployment summary
-        run: |
-          echo "✅ Web image built and deployed!"
-          echo "Image: ${{ steps.meta.outputs.tags }}"
-          kubectl get pods -n batchsender -l app=web
+          echo "✅ ArgoCD refresh triggered"
+          echo "Image pushed: ${{ steps.meta.outputs.tags }}"
+          echo "ArgoCD will sync automatically (check ArgoCD UI for status)"
