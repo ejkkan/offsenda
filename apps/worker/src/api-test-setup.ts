@@ -84,12 +84,14 @@ export async function registerTestSetupApi(app: FastifyInstance): Promise<void> 
     });
 
     if (!user) {
-      // Create new user
+      // Create new user with a random password hash (test users don't use password auth)
+      const randomPasswordHash = crypto.randomBytes(32).toString("hex");
       const [newUser] = await db
         .insert(users)
         .values({
           email,
           name: name || email.split("@")[0],
+          passwordHash: randomPasswordHash,
         })
         .returning();
       user = newUser;
@@ -296,6 +298,7 @@ export async function registerTestSetupApi(app: FastifyInstance): Promise<void> 
 
     for (let i = 0; i < count; i++) {
       const email = `${prefix}-${timestamp}-${i}@test.batchsender.com`;
+      const randomPasswordHash = crypto.randomBytes(32).toString("hex");
 
       // Create user
       const [user] = await db
@@ -303,6 +306,7 @@ export async function registerTestSetupApi(app: FastifyInstance): Promise<void> 
         .values({
           email,
           name: `${prefix} User ${i}`,
+          passwordHash: randomPasswordHash,
         })
         .returning();
 
