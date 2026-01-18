@@ -109,6 +109,8 @@ export const batches = pgTable(
     scheduledAt: timestamp("scheduled_at"),
     startedAt: timestamp("started_at"),
     completedAt: timestamp("completed_at"),
+    // Dry run mode - processes everything but skips actual outbound calls
+    dryRun: boolean("dry_run").default(false).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

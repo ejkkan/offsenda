@@ -414,6 +414,8 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     name: z.string().min(1),
     sendConfigId: z.string().uuid().optional(),
     scheduledAt: z.string().datetime().optional(),
+    // Dry run mode - processes everything but skips actual outbound calls
+    dryRun: z.boolean().optional().default(false),
     // Email fields (required for email module without sendConfigId)
     subject: z.string().optional(),
     fromEmail: z.string().email().optional(),
@@ -572,6 +574,7 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
           totalRecipients: data.recipients.length,
           status,
           scheduledAt,
+          dryRun: data.dryRun,
         })
         .returning();
 
@@ -597,6 +600,7 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
         status: batch.status,
         scheduledAt: batch.scheduledAt,
         sendConfigId: batch.sendConfigId,
+        dryRun: batch.dryRun,
       });
       } catch (error) {
         if (error instanceof z.ZodError) {

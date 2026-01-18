@@ -31,6 +31,7 @@ export interface CreateBatchRequest {
     variables?: Record<string, string>;
   }>;
   autoSend?: boolean; // Auto-send batch after creation (for E2E tests)
+  dryRun?: boolean; // Dry run mode - skip actual outbound calls
 }
 
 export interface CreateBatchResponse {
@@ -38,6 +39,7 @@ export interface CreateBatchResponse {
   name: string;
   totalRecipients: number;
   status: string;
+  dryRun: boolean;
 }
 
 /**
@@ -47,7 +49,7 @@ export interface CreateBatchResponse {
 export async function createBatch(
   request: CreateBatchRequest
 ): Promise<CreateBatchResponse> {
-  // Destructure autoSend from request (don't send it to API)
+  // Destructure autoSend from request (don't send it to API, but dryRun should be sent)
   const { autoSend, ...batchData } = request;
 
   const response = await fetch(`${WORKER_URL}/api/batches`, {

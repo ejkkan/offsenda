@@ -91,7 +91,7 @@ async function startInfrastructure(): Promise<void> {
   // Wait for services to be ready
   await waitForService("NATS", async () => {
     try {
-      const response = await fetch("http://localhost:8222/healthz");
+      const response = await fetch("http://localhost:8223/healthz");
       return response.ok;
     } catch {
       return false;

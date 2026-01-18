@@ -351,6 +351,8 @@ export class NatsEmailWorker {
         subject: batch.subject || undefined,
         htmlContent: batch.htmlContent || undefined,
         textContent: batch.textContent || undefined,
+        // Pass through dry run mode
+        dryRun: batch.dryRun,
       }));
 
       // Enqueue jobs to NATS
@@ -434,6 +436,7 @@ export class NatsEmailWorker {
         htmlContent,
         textContent,
         data: webhookData,
+        dryRun,
       } = data;
 
       // Get the appropriate module
@@ -464,25 +467,42 @@ export class NatsEmailWorker {
       // Start timing the send operation
       const sendTimer = emailSendDuration.startTimer({ provider: sendConfig.module, status: "success" });
 
-      // Execute via module system
-      // Build a SendConfig-like object for the module
-      const configForModule = {
-        id: sendConfig.id,
-        userId,
-        name: "embedded",
-        module: sendConfig.module,
-        config: sendConfig.config,
-        rateLimit: sendConfig.rateLimit ?? null,
-        isDefault: false,
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+      let result: JobResult;
 
-      const result: JobResult = await module.execute(jobPayload, configForModule);
+      if (dryRun) {
+        // Dry run mode - skip actual outbound call but simulate success
+        // Add realistic latency to simulate actual processing
+        const simulatedLatency = 20 + Math.random() * 80; // 20-100ms
+        await new Promise((resolve) => setTimeout(resolve, simulatedLatency));
 
-      if (!result.success) {
-        throw new Error(result.error || `Failed to execute ${sendConfig.module} module`);
+        result = {
+          success: true,
+          providerMessageId: `dry-run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          latencyMs: simulatedLatency,
+        };
+
+        log.email.debug({ batchId, recipientId, module: sendConfig.module }, "dry run - skipped outbound call");
+      } else {
+        // Execute via module system
+        // Build a SendConfig-like object for the module
+        const configForModule = {
+          id: sendConfig.id,
+          userId,
+          name: "embedded",
+          module: sendConfig.module,
+          config: sendConfig.config,
+          rateLimit: sendConfig.rateLimit ?? null,
+          isDefault: false,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        result = await module.execute(jobPayload, configForModule);
+
+        if (!result.success) {
+          throw new Error(result.error || `Failed to execute ${sendConfig.module} module`);
+        }
       }
 
       const providerMessageId = result.providerMessageId || "";

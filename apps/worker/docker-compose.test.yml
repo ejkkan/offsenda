@@ -7,7 +7,7 @@ services:
     container_name: batchsender-test-nats
     ports:
       - "4222:4222" # Client connections
-      - "8222:8222" # HTTP monitoring
+      - "8223:8222" # HTTP monitoring (8223 to avoid k3d conflict)
     command: ["-js", "-m", "8222", "-sd", "/data"]
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]

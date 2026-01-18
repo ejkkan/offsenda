@@ -7,6 +7,7 @@ import { log, createTimer, getTraceId } from "../logger.js";
 export interface BatchJobData {
   batchId: string;
   userId: string;
+  dryRun?: boolean;
 }
 
 /**
@@ -41,6 +42,8 @@ export interface JobData {
   textContent?: string;
   // Webhook-specific fields (for webhook module)
   data?: Record<string, unknown>;
+  // Dry run mode - skip actual outbound calls
+  dryRun?: boolean;
 }
 
 // Legacy alias for backwards compatibility
