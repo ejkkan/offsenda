@@ -908,4 +908,18 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     }
     return reply.send({ success: true, message: "All circuit breakers reset (shared across all pods)" });
   });
+
+  // GET /api/test-webhook/circuit-status - Get circuit breaker status (for debugging)
+  app.get("/api/test-webhook/circuit-status", async (request, reply) => {
+    const webhookModule = getModule("webhook");
+    if (webhookModule && "getCircuitStatus" in webhookModule) {
+      const status = await (webhookModule as any).getCircuitStatus();
+      const result: Record<string, { state: string; failures: number }> = {};
+      for (const [host, data] of status) {
+        result[host] = data;
+      }
+      return reply.send({ circuits: result });
+    }
+    return reply.send({ circuits: {} });
+  });
 }
