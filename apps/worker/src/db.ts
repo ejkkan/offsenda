@@ -40,13 +40,7 @@ if (config.NODE_ENV === "test" || config.NODE_ENV === "development") {
   const { neon } = await import("@neondatabase/serverless");
   const { drizzle } = await import("drizzle-orm/neon-http");
 
-  const sql = neon(config.DATABASE_URL, {
-    // Neon HTTP client options
-    fetchOptions: {
-      // Increase timeout for bulk operations
-      signal: AbortSignal.timeout(30000),
-    },
-  });
+  const sql = neon(config.DATABASE_URL);
   db = drizzle(sql as any, { schema });
 }
 
