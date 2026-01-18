@@ -81,13 +81,14 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
 
   // Auth middleware
   app.addHook("preHandler", async (request, reply) => {
-    // Skip auth for health check, metrics, and webhooks
+    // Skip auth for health check, metrics, webhooks, and test webhook endpoint
     // Support both /metrics and /api/metrics for Prometheus compatibility
     if (
       request.url === "/health" ||
       request.url.startsWith("/metrics") ||
       request.url.startsWith("/api/metrics") ||
-      request.url.startsWith("/webhooks")
+      request.url.startsWith("/webhooks") ||
+      request.url.startsWith("/api/test-webhook")
     ) {
       return;
     }
