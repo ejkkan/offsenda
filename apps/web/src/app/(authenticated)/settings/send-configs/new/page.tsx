@@ -33,6 +33,7 @@ export default function NewSendConfigPage() {
   const [webhookMethod, setWebhookMethod] = useState<"POST" | "PUT">("POST");
   const [webhookTimeout, setWebhookTimeout] = useState(30000);
   const [webhookRetries, setWebhookRetries] = useState(3);
+  const [webhookHeaders, setWebhookHeaders] = useState<{ key: string; value: string }[]>([]);
 
   // SMS config state
   const [smsProvider, setSmsProvider] = useState<SmsProvider>("twilio");
@@ -69,11 +70,20 @@ export default function NewSendConfigPage() {
           ...(fromName && { fromName }),
         };
       } else if (module === "webhook") {
+        // Convert headers array to object
+        const headersObj: Record<string, string> = {};
+        webhookHeaders.forEach((h) => {
+          if (h.key.trim()) {
+            headersObj[h.key.trim()] = h.value;
+          }
+        });
+
         config = {
           url: webhookUrl,
           method: webhookMethod,
           timeout: webhookTimeout,
           retries: webhookRetries,
+          ...(Object.keys(headersObj).length > 0 && { headers: headersObj }),
         };
       } else if (module === "sms") {
         config = {
@@ -626,6 +636,60 @@ export default function NewSendConfigPage() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2"
                 />
               </div>
+            </div>
+
+            {/* Custom Headers */}
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Custom Headers (optional)
+              </label>
+              <div className="space-y-2">
+                {webhookHeaders.map((header, index) => (
+                  <div key={index} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={header.key}
+                      onChange={(e) => {
+                        const newHeaders = [...webhookHeaders];
+                        newHeaders[index].key = e.target.value;
+                        setWebhookHeaders(newHeaders);
+                      }}
+                      placeholder="Header name"
+                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                    <input
+                      type="text"
+                      value={header.value}
+                      onChange={(e) => {
+                        const newHeaders = [...webhookHeaders];
+                        newHeaders[index].value = e.target.value;
+                        setWebhookHeaders(newHeaders);
+                      }}
+                      placeholder="Header value"
+                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWebhookHeaders(webhookHeaders.filter((_, i) => i !== index));
+                      }}
+                      className="px-3 py-2 text-red-600 hover:text-red-800 text-sm"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setWebhookHeaders([...webhookHeaders, { key: "", value: "" }])}
+                  className="text-sm text-blue-600 hover:text-blue-800"
+                >
+                  + Add Header
+                </button>
+              </div>
+              <p className="text-sm text-gray-500 mt-1">
+                Add custom headers like Authorization, X-API-Key, etc.
+              </p>
             </div>
           </div>
         )}
