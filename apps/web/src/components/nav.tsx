@@ -12,6 +12,7 @@ export function Nav() {
     { href: "/batches", label: "Batches" },
     { href: "/batches/new", label: "New Batch" },
     { href: "/settings/send-configs", label: "Settings" },
+    { href: "/settings/api-keys", label: "API Keys" },
   ];
 
   return (

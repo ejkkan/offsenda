@@ -848,4 +848,54 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
 
   app.get("/metrics", metricsHandler);
   app.get("/api/metrics", metricsHandler);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEST WEBHOOK ENDPOINTS (for load testing)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // In-memory stats storage
+  const testWebhookStats = {
+    count: 0,
+    startTime: Date.now(),
+    lastPayloads: [] as { timestamp: number; payload: unknown }[],
+    maxStoredPayloads: 10,
+  };
+
+  // POST /api/test-webhook - Accept webhook requests
+  app.post("/api/test-webhook", async (request, reply) => {
+    const timestamp = Date.now();
+    testWebhookStats.count++;
+
+    // Store last N payloads
+    testWebhookStats.lastPayloads.unshift({ timestamp, payload: request.body });
+    if (testWebhookStats.lastPayloads.length > testWebhookStats.maxStoredPayloads) {
+      testWebhookStats.lastPayloads.pop();
+    }
+
+    return reply.status(200).send({
+      id: `test-${timestamp}-${testWebhookStats.count}`,
+      success: true,
+    });
+  });
+
+  // GET /api/test-webhook/stats - Get stats
+  app.get("/api/test-webhook/stats", async (request, reply) => {
+    const elapsed = (Date.now() - testWebhookStats.startTime) / 1000;
+    const throughput = elapsed > 0 ? testWebhookStats.count / elapsed : 0;
+
+    return reply.send({
+      count: testWebhookStats.count,
+      elapsedSeconds: Math.round(elapsed),
+      throughputPerSecond: Math.round(throughput * 100) / 100,
+      lastPayloads: testWebhookStats.lastPayloads,
+    });
+  });
+
+  // DELETE /api/test-webhook/reset - Reset stats
+  app.delete("/api/test-webhook/reset", async (request, reply) => {
+    testWebhookStats.count = 0;
+    testWebhookStats.startTime = Date.now();
+    testWebhookStats.lastPayloads = [];
+    return reply.send({ success: true });
+  });
 }
