@@ -909,6 +909,34 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     return reply.send({ success: true, message: "All circuit breakers reset (shared across all pods)" });
   });
 
+  // POST /api/test-webhook/debug-call - Make a test HTTP call (for debugging network issues)
+  app.post("/api/test-webhook/debug-call", async (request, reply) => {
+    const { url } = request.body as { url?: string };
+    if (!url) {
+      return reply.status(400).send({ error: "url required" });
+    }
+    try {
+      const start = Date.now();
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ debug: true, timestamp: Date.now() }),
+      });
+      const body = await response.text();
+      return reply.send({
+        success: response.ok,
+        status: response.status,
+        latencyMs: Date.now() - start,
+        body: body.slice(0, 500),
+      });
+    } catch (error) {
+      return reply.send({
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
   // GET /api/test-webhook/circuit-status - Get circuit breaker status (for debugging)
   app.get("/api/test-webhook/circuit-status", async (request, reply) => {
     const webhookModule = getModule("webhook");
