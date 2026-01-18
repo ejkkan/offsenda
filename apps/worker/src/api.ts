@@ -915,6 +915,18 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     if (!url) {
       return reply.status(400).send({ error: "url required" });
     }
+
+    // Try DNS lookup first
+    let dnsInfo: string | null = null;
+    try {
+      const { hostname } = new URL(url);
+      const dns = await import("dns").then((m) => m.promises);
+      const addresses = await dns.lookup(hostname, { all: true });
+      dnsInfo = JSON.stringify(addresses);
+    } catch (e) {
+      dnsInfo = `DNS error: ${e instanceof Error ? e.message : "unknown"}`;
+    }
+
     try {
       const start = Date.now();
       const response = await fetch(url, {
@@ -928,11 +940,13 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
         status: response.status,
         latencyMs: Date.now() - start,
         body: body.slice(0, 500),
+        dns: dnsInfo,
       });
     } catch (error) {
       return reply.send({
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: error instanceof Error ? `${error.name}: ${error.message}` : "Unknown error",
+        dns: dnsInfo,
       });
     }
   });
