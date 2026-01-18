@@ -46,6 +46,7 @@ const navigation: NavItem[] = [
     children: [
       { href: "/settings/send-configs", label: "Send Configs" },
       { href: "/settings/send-configs/new", label: "New Config" },
+      { href: "/settings/api-keys", label: "API Keys" },
     ],
   },
 ];

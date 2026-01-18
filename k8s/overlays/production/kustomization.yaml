@@ -4,6 +4,15 @@ kind: Kustomization
 resources:
 - ../../base
 
+# Image tags - updated by CI pipeline
+images:
+- name: ghcr.io/ejkkan/offsenda-worker
+  newTag: latest
+- name: ghcr.io/ejkkan/offsenda-web
+  newTag: latest
+- name: ghcr.io/ejkkan/offsenda-migration
+  newTag: latest
+
 # Production patches
   # Use production image from container registry
 

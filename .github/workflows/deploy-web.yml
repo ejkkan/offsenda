@@ -11,18 +11,20 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/offsenda-web
+  IMAGE_NAME: ghcr.io/ejkkan/offsenda-web
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -34,14 +36,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GH_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Generate image tag
+        id: tag
+        run: echo "tag=main-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -49,28 +46,26 @@ jobs:
           context: .
           file: apps/web/Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:latest
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: 'v1.28.0'
-
-      - name: Configure kubeconfig
+      - name: Update image tag in kustomization
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-          chmod 600 ~/.kube/config
+          cd k8s/overlays/production
+          # Use sed to update the newTag for the web image
+          sed -i 's|name: ghcr.io/ejkkan/offsenda-web\n  newTag: .*|name: ghcr.io/ejkkan/offsenda-web\n  newTag: ${{ steps.tag.outputs.tag }}|' kustomization.yaml
+          # More reliable: use yq if available, or simple sed
+          sed -i '/name: ghcr.io\/ejkkan\/offsenda-web/{n;s/newTag: .*/newTag: ${{ steps.tag.outputs.tag }}/}' kustomization.yaml
+          cat kustomization.yaml
 
-      - name: Trigger ArgoCD sync
+      - name: Commit and push
         run: |
-          # Force ArgoCD to refresh - don't wait, ArgoCD handles the rest
-          kubectl annotate application batchsender -n argocd \
-            argocd.argoproj.io/refresh=hard --overwrite
-          echo "✅ ArgoCD refresh triggered"
-          echo "Image pushed: ${{ steps.meta.outputs.tags }}"
-          echo "ArgoCD will sync automatically (check ArgoCD UI for status)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/production/kustomization.yaml
+          git diff --staged --quiet || git commit -m "chore: update web image to ${{ steps.tag.outputs.tag }} [skip ci]"
+          git push
