@@ -33,7 +33,7 @@ export default async function ApiKeysPage() {
         <div>
           <h1 className="text-2xl font-bold">API Keys</h1>
           <p className="text-gray-600 mt-1">
-            Manage your API keys for programmatic access to BatchSender.
+            Manage your API keys for programmatic access to the BatchSender API.
           </p>
         </div>
         <Link
