@@ -101,7 +101,7 @@ export async function registerTestSetupApi(app: FastifyInstance): Promise<void> 
     // Generate API key
     const rawKey = generateApiKey();
     const keyHash = crypto.createHash("sha256").update(rawKey).digest("hex");
-    const keyPrefix = rawKey.slice(0, 12);
+    const keyPrefix = rawKey.slice(0, 10);
 
     const [apiKey] = await db
       .insert(apiKeys)
@@ -186,7 +186,7 @@ export async function registerTestSetupApi(app: FastifyInstance): Promise<void> 
 
     const rawKey = generateApiKey();
     const keyHash = crypto.createHash("sha256").update(rawKey).digest("hex");
-    const keyPrefix = rawKey.slice(0, 12);
+    const keyPrefix = rawKey.slice(0, 10);
 
     const [apiKey] = await db
       .insert(apiKeys)
@@ -313,7 +313,7 @@ export async function registerTestSetupApi(app: FastifyInstance): Promise<void> 
       // Create API key
       const rawKey = generateApiKey();
       const keyHash = crypto.createHash("sha256").update(rawKey).digest("hex");
-      const keyPrefix = rawKey.slice(0, 12);
+      const keyPrefix = rawKey.slice(0, 10);
 
       const [apiKey] = await db
         .insert(apiKeys)
