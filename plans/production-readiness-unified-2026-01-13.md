@@ -577,8 +577,8 @@ spec:
 | **Medium Priority** |
 | 16. Multi-Region | High | High | ⭐⭐⭐ | 2-4w | ⬜ |
 | 17. Encryption at Rest | High | Medium | ⭐⭐⭐ | 1w | ⬜ |
-| 18. API Gateway | Medium | Medium | ⭐⭐ | 1-2w | ⬜ |
-| 19. Load Testing | Medium | Medium | ⭐⭐⭐ | 1w | ⬜ |
+| 18. API Rate Limiting | Medium | Medium | ⭐⭐ | 1-2w | ✅ |
+| 19. Load Testing | Medium | Medium | ⭐⭐⭐ | 1w | ✅ |
 | 20. Feature Flags | Medium | Medium | ⭐⭐ | 1w | ⬜ |
 
 ---

@@ -1,5 +1,6 @@
 import { log, createTimer } from "../logger.js";
 import { getSharedCircuitBreaker, SharedCircuitBreaker, CircuitState } from "./shared-circuit-breaker.js";
+import { calculateBackoff } from "../domain/utils/backoff.js";
 
 // =============================================================================
 // Resilient HTTP Client
@@ -216,7 +217,7 @@ export class ResilientHttpClient {
       try {
         // Add delay for retries (not first attempt)
         if (attempt > 0) {
-          const delay = this.calculateBackoff(attempt);
+          const delay = this.calculateBackoffDelay(attempt);
           log.system.debug({ url, attempt, delayMs: delay }, "retrying request");
           await this.sleep(delay);
         }
@@ -386,21 +387,15 @@ export class ResilientHttpClient {
 
   /**
    * Calculate backoff delay for a retry attempt
+   * Uses domain layer backoff function
    */
-  private calculateBackoff(attempt: number): number {
-    let delay = this.config.retry.baseDelayMs *
-      Math.pow(this.config.retry.backoffMultiplier, attempt - 1);
-
-    // Apply max cap
-    delay = Math.min(delay, this.config.retry.maxDelayMs);
-
-    // Apply jitter (±25%)
-    if (this.config.retry.jitter) {
-      const jitterFactor = 0.75 + Math.random() * 0.5;
-      delay = Math.floor(delay * jitterFactor);
-    }
-
-    return delay;
+  private calculateBackoffDelay(attempt: number): number {
+    return calculateBackoff(attempt - 1, {
+      baseDelayMs: this.config.retry.baseDelayMs,
+      maxDelayMs: this.config.retry.maxDelayMs,
+      // Convert boolean jitter config to jitterFactor (0.25 = ±25% variance)
+      jitterFactor: this.config.retry.jitter ? 0.25 : 0,
+    });
   }
 
   /**

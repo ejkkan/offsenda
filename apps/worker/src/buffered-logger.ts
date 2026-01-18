@@ -10,6 +10,7 @@
 
 import { clickhouse, type EmailEvent, type EventType, type ModuleType } from "./clickhouse.js";
 import { log } from "./logger.js";
+import { calculateBackoff } from "./domain/utils/backoff.js";
 
 export interface BufferedLoggerConfig {
   /** Maximum events to buffer before forced flush (default: 10000) */
@@ -247,8 +248,9 @@ export class BufferedEventLogger {
             { error, attempt: attempt + 1, eventCount: events.length },
             "BufferedEventLogger flush retry"
           );
-          // Exponential backoff
-          await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 100));
+          // Exponential backoff using domain layer
+          const delay = calculateBackoff(attempt, { baseDelayMs: 100, maxDelayMs: 1600 });
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
     }
@@ -284,7 +286,9 @@ export class BufferedEventLogger {
             { error, attempt: attempt + 1, indexCount: indexes.length },
             "BufferedEventLogger index flush retry"
           );
-          await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 100));
+          // Exponential backoff using domain layer
+          const delay = calculateBackoff(attempt, { baseDelayMs: 100, maxDelayMs: 1600 });
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
     }

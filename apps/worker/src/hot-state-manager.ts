@@ -16,6 +16,15 @@
 import Redis from "ioredis";
 import { config } from "./config.js";
 import { log } from "./logger.js";
+import {
+  createInitialState,
+  checkCircuit as checkCircuitDomain,
+  recordSuccess as recordSuccessDomain,
+  recordFailure as recordFailureDomain,
+  getCircuitStatus,
+  type CircuitBreakerState,
+  type CircuitBreakerConfig,
+} from "./domain/circuit-breaker/index.js";
 
 export type RecipientStatus = "pending" | "queued" | "sent" | "failed" | "bounced" | "complained";
 
@@ -43,6 +52,8 @@ export interface HotStateConfig {
   circuitBreakerThreshold?: number;
   /** Circuit breaker reset timeout in ms (default: 30000) */
   circuitBreakerResetMs?: number;
+  /** Circuit breaker sliding window size in ms (default: 60000) */
+  circuitBreakerWindowMs?: number;
 }
 
 const DEFAULT_CONFIG: Required<Omit<HotStateConfig, "redis">> = {
@@ -50,6 +61,7 @@ const DEFAULT_CONFIG: Required<Omit<HotStateConfig, "redis">> = {
   activeBatchTtlMs: 7 * 24 * 60 * 60 * 1000, // 7 days
   circuitBreakerThreshold: 5,
   circuitBreakerResetMs: 30000,
+  circuitBreakerWindowMs: 60000, // 1 minute sliding window
 };
 
 type CircuitState = "closed" | "open" | "half-open";
@@ -152,14 +164,13 @@ export class HotStateManager {
   private config: Required<Omit<HotStateConfig, "redis">>;
   private isShuttingDown = false;
 
-  // Circuit breaker state
-  private circuitState: CircuitState = "closed";
-  private failureCount = 0;
-  private lastFailureTime = 0;
-  private circuitOpenedAt = 0;
+  // Circuit breaker state using domain layer
+  private circuitBreakerState: CircuitBreakerState;
+  private circuitBreakerConfig: CircuitBreakerConfig;
 
   constructor(hotStateConfig?: HotStateConfig) {
     this.config = { ...DEFAULT_CONFIG };
+    this.circuitBreakerState = createInitialState();
 
     if (hotStateConfig?.completedBatchTtlMs) {
       this.config.completedBatchTtlMs = hotStateConfig.completedBatchTtlMs;
@@ -173,6 +184,16 @@ export class HotStateManager {
     if (hotStateConfig?.circuitBreakerResetMs) {
       this.config.circuitBreakerResetMs = hotStateConfig.circuitBreakerResetMs;
     }
+    if (hotStateConfig?.circuitBreakerWindowMs) {
+      this.config.circuitBreakerWindowMs = hotStateConfig.circuitBreakerWindowMs;
+    }
+
+    // Initialize circuit breaker config from domain layer
+    this.circuitBreakerConfig = {
+      threshold: this.config.circuitBreakerThreshold,
+      resetMs: this.config.circuitBreakerResetMs,
+      windowMs: this.config.circuitBreakerWindowMs,
+    };
 
     if (hotStateConfig?.redis) {
       this.redis = hotStateConfig.redis;
@@ -227,7 +248,7 @@ export class HotStateManager {
   }
 
   // =========================================================================
-  // Circuit Breaker
+  // Circuit Breaker (using domain layer)
   // =========================================================================
 
   /**
@@ -235,27 +256,31 @@ export class HotStateManager {
    * Throws if circuit is open (fail-safe for critical operations)
    */
   private checkCircuit(): void {
-    if (this.circuitState === "open") {
-      // Check if we should transition to half-open
-      if (Date.now() - this.circuitOpenedAt >= this.config.circuitBreakerResetMs) {
-        this.circuitState = "half-open";
+    const now = Date.now();
+    const result = checkCircuitDomain(this.circuitBreakerState, this.circuitBreakerConfig, now);
+
+    if (result.newState) {
+      const oldState = this.circuitBreakerState.state;
+      this.circuitBreakerState = result.newState;
+      if (oldState === "open" && result.newState.state === "half-open") {
         log.system.info({}, "HotStateManager circuit breaker half-open, testing connection");
-      } else {
-        throw new Error("HotStateManager circuit breaker is open - Dragonfly unavailable");
       }
+    }
+
+    if (!result.canProceed) {
+      throw new Error("HotStateManager circuit breaker is open - Dragonfly unavailable");
     }
   }
 
   /**
-   * Record a successful operation (resets failure count)
+   * Record a successful operation
    */
   private recordSuccess(): void {
-    if (this.circuitState === "half-open") {
-      this.circuitState = "closed";
-      this.failureCount = 0;
+    const oldState = this.circuitBreakerState.state;
+    this.circuitBreakerState = recordSuccessDomain(this.circuitBreakerState);
+
+    if (oldState === "half-open" && this.circuitBreakerState.state === "closed") {
       log.system.info({}, "HotStateManager circuit breaker closed, connection restored");
-    } else if (this.failureCount > 0) {
-      this.failureCount = 0;
     }
   }
 
@@ -263,19 +288,19 @@ export class HotStateManager {
    * Record a failed operation (may trip circuit)
    */
   private recordFailure(error: Error): void {
-    this.failureCount++;
-    this.lastFailureTime = Date.now();
+    const now = Date.now();
+    const oldState = this.circuitBreakerState.state;
+    this.circuitBreakerState = recordFailureDomain(this.circuitBreakerState, this.circuitBreakerConfig, now);
 
-    if (this.circuitState === "half-open") {
-      // Failed during test, reopen circuit
-      this.circuitState = "open";
-      this.circuitOpenedAt = Date.now();
+    if (oldState === "half-open" && this.circuitBreakerState.state === "open") {
       log.system.error({ error }, "HotStateManager circuit breaker reopened after test failure");
-    } else if (this.failureCount >= this.config.circuitBreakerThreshold) {
-      this.circuitState = "open";
-      this.circuitOpenedAt = Date.now();
+    } else if (oldState === "closed" && this.circuitBreakerState.state === "open") {
       log.system.error(
-        { failures: this.failureCount, threshold: this.config.circuitBreakerThreshold },
+        {
+          failures: this.circuitBreakerState.failureTimestamps.length,
+          threshold: this.circuitBreakerConfig.threshold,
+          windowMs: this.circuitBreakerConfig.windowMs,
+        },
         "HotStateManager circuit breaker opened"
       );
     }
@@ -284,11 +309,14 @@ export class HotStateManager {
   /**
    * Get circuit breaker status for monitoring
    */
-  getCircuitState(): { state: CircuitState; failures: number; lastFailure: number } {
+  getCircuitState(): { state: string; failures: number; lastFailure: number; windowMs: number; isAvailable: boolean } {
+    const status = getCircuitStatus(this.circuitBreakerState, this.circuitBreakerConfig, Date.now());
     return {
-      state: this.circuitState,
-      failures: this.failureCount,
-      lastFailure: this.lastFailureTime,
+      state: status.state,
+      failures: status.failures,
+      lastFailure: status.lastFailure,
+      windowMs: status.windowMs,
+      isAvailable: status.isAvailable,
     };
   }
 
@@ -296,13 +324,8 @@ export class HotStateManager {
    * Check if Dragonfly is available (circuit closed or half-open)
    */
   isAvailable(): boolean {
-    if (this.circuitState === "open") {
-      if (Date.now() - this.circuitOpenedAt >= this.config.circuitBreakerResetMs) {
-        return true; // Will transition to half-open
-      }
-      return false;
-    }
-    return true;
+    const status = getCircuitStatus(this.circuitBreakerState, this.circuitBreakerConfig, Date.now());
+    return status.isAvailable;
   }
 
   // =========================================================================

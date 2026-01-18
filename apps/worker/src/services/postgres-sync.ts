@@ -13,12 +13,13 @@
  * Runs every 2 seconds by default, processing up to 1000 recipients per batch per cycle.
  */
 
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { recipients, batches } from "@batchsender/db";
 import { db } from "../db.js";
 import { getHotStateManager, type RecipientState } from "../hot-state-manager.js";
 import { log } from "../logger.js";
 import { batchesProcessedTotal } from "../metrics.js";
+import { groupRecipientsByStatus } from "../domain/utils/recipient-grouping.js";
 
 export interface PostgresSyncConfig {
   /** Sync interval in milliseconds (default: 2000) */
@@ -27,12 +28,15 @@ export interface PostgresSyncConfig {
   maxRecipientsPerSync?: number;
   /** Whether to enable the service (default: true) */
   enabled?: boolean;
+  /** Time after which a processing batch is considered stuck (default: 10 minutes) */
+  stuckBatchThresholdMs?: number;
 }
 
 const DEFAULT_CONFIG: Required<PostgresSyncConfig> = {
   syncIntervalMs: 2000,
   maxRecipientsPerSync: 1000,
   enabled: true,
+  stuckBatchThresholdMs: 10 * 60 * 1000, // 10 minutes
 };
 
 export class PostgresSyncService {
@@ -40,10 +44,12 @@ export class PostgresSyncService {
   private syncInterval: ReturnType<typeof setInterval> | null = null;
   private isRunning = false;
   private isShuttingDown = false;
+  private batchesInFlight = new Set<string>(); // Track batches currently being synced
   private stats = {
     syncCycles: 0,
     recipientsSynced: 0,
     batchesCompleted: 0,
+    batchesRecovered: 0,
     errors: 0,
     lastSyncTime: 0,
     lastSyncDuration: 0,
@@ -55,8 +61,9 @@ export class PostgresSyncService {
 
   /**
    * Start the sync service
+   * Runs crash recovery first, then starts periodic sync
    */
-  start(): void {
+  async start(): Promise<void> {
     if (!this.config.enabled) {
       log.system.info({}, "PostgresSyncService disabled");
       return;
@@ -65,6 +72,9 @@ export class PostgresSyncService {
     if (this.syncInterval) {
       return; // Already running
     }
+
+    // Run crash recovery on startup
+    await this.recoverStuckBatches();
 
     this.syncInterval = setInterval(() => {
       if (!this.isRunning) {
@@ -82,6 +92,106 @@ export class PostgresSyncService {
       },
       "PostgresSyncService started"
     );
+  }
+
+  /**
+   * Recover batches that were stuck in "processing" status due to crash
+   * Checks if Dragonfly has state, and either syncs it or marks batch for retry
+   */
+  private async recoverStuckBatches(): Promise<void> {
+    try {
+      const stuckThreshold = new Date(Date.now() - this.config.stuckBatchThresholdMs);
+
+      // Find batches stuck in "processing" for too long
+      const stuckBatches = await db.query.batches.findMany({
+        where: and(
+          eq(batches.status, "processing"),
+          sql`${batches.updatedAt} < ${stuckThreshold}`
+        ),
+        columns: { id: true, totalCount: true },
+      });
+
+      if (stuckBatches.length === 0) {
+        return;
+      }
+
+      log.system.info({ count: stuckBatches.length }, "PostgresSyncService found stuck batches, attempting recovery");
+
+      const hotState = getHotStateManager();
+
+      for (const batch of stuckBatches) {
+        try {
+          // Check if Dragonfly has state for this batch
+          const counters = await hotState.getCounters(batch.id);
+
+          if (counters && counters.total > 0) {
+            // Dragonfly has state - sync it to PostgreSQL
+            log.system.info({ batchId: batch.id, counters }, "Recovering batch from Dragonfly state");
+
+            // Full sync: get all pending recipients and sync them
+            let totalSynced = 0;
+            let pendingIds = await hotState.getPendingSyncRecipients(batch.id, this.config.maxRecipientsPerSync);
+
+            while (pendingIds.length > 0) {
+              const states = await hotState.getRecipientStates(batch.id, pendingIds);
+              const syncedIds = await this.bulkUpdateRecipients(batch.id, states);
+              await hotState.markSynced(batch.id, syncedIds);
+              totalSynced += syncedIds.length;
+              pendingIds = await hotState.getPendingSyncRecipients(batch.id, this.config.maxRecipientsPerSync);
+            }
+
+            // Sync final counters
+            await this.syncCounters(batch.id, hotState);
+
+            // Check if actually complete
+            if (counters.total > 0 && (counters.sent + counters.failed) >= counters.total) {
+              await db
+                .update(batches)
+                .set({
+                  status: "completed",
+                  sentCount: counters.sent,
+                  failedCount: counters.failed,
+                  completedAt: new Date(),
+                  updatedAt: new Date(),
+                })
+                .where(eq(batches.id, batch.id));
+              await hotState.markBatchCompleted(batch.id);
+              log.system.info({ batchId: batch.id, synced: totalSynced }, "Batch recovered and completed");
+            } else {
+              // Update counters but keep processing status - batch will be picked up by workers
+              await db
+                .update(batches)
+                .set({
+                  sentCount: counters.sent,
+                  failedCount: counters.failed,
+                  updatedAt: new Date(),
+                })
+                .where(eq(batches.id, batch.id));
+              log.system.info({ batchId: batch.id, synced: totalSynced, counters }, "Batch state recovered, still processing");
+            }
+
+            this.stats.batchesRecovered++;
+          } else {
+            // No Dragonfly state - reset to queued so it gets reprocessed
+            log.system.warn({ batchId: batch.id }, "No Dragonfly state found, resetting batch to queued");
+            await db
+              .update(batches)
+              .set({
+                status: "queued",
+                updatedAt: new Date(),
+              })
+              .where(eq(batches.id, batch.id));
+            this.stats.batchesRecovered++;
+          }
+        } catch (error) {
+          log.system.error({ error, batchId: batch.id }, "Failed to recover stuck batch");
+          this.stats.errors++;
+        }
+      }
+    } catch (error) {
+      log.system.error({ error }, "PostgresSyncService crash recovery failed");
+      this.stats.errors++;
+    }
   }
 
   /**
@@ -159,35 +269,43 @@ export class PostgresSyncService {
 
   /**
    * Sync a single batch from Dragonfly to PostgreSQL
+   * Tracks in-flight batches for crash recovery visibility
    */
   private async syncBatch(batchId: string, hotState: ReturnType<typeof getHotStateManager>): Promise<void> {
-    // 1. Get pending sync recipients
-    const pendingRecipientIds = await hotState.getPendingSyncRecipients(
-      batchId,
-      this.config.maxRecipientsPerSync
-    );
+    // Track this batch as in-flight
+    this.batchesInFlight.add(batchId);
 
-    if (pendingRecipientIds.length === 0) {
-      // No pending syncs, but check if we should mark batch complete
+    try {
+      // 1. Get pending sync recipients
+      const pendingRecipientIds = await hotState.getPendingSyncRecipients(
+        batchId,
+        this.config.maxRecipientsPerSync
+      );
+
+      if (pendingRecipientIds.length === 0) {
+        // No pending syncs, but check if we should mark batch complete
+        await this.checkAndCompleteBatch(batchId, hotState);
+        return;
+      }
+
+      // 2. Get recipient states from Dragonfly
+      const recipientStates = await hotState.getRecipientStates(batchId, pendingRecipientIds);
+
+      // 3. Bulk update PostgreSQL
+      const syncedIds = await this.bulkUpdateRecipients(batchId, recipientStates);
+
+      // 4. Mark synced in Dragonfly
+      if (syncedIds.length > 0) {
+        await hotState.markSynced(batchId, syncedIds);
+        this.stats.recipientsSynced += syncedIds.length;
+      }
+
+      // 5. Sync counters and check completion
+      await this.syncCounters(batchId, hotState);
       await this.checkAndCompleteBatch(batchId, hotState);
-      return;
+    } finally {
+      this.batchesInFlight.delete(batchId);
     }
-
-    // 2. Get recipient states from Dragonfly
-    const recipientStates = await hotState.getRecipientStates(batchId, pendingRecipientIds);
-
-    // 3. Bulk update PostgreSQL
-    const syncedIds = await this.bulkUpdateRecipients(batchId, recipientStates);
-
-    // 4. Mark synced in Dragonfly
-    if (syncedIds.length > 0) {
-      await hotState.markSynced(batchId, syncedIds);
-      this.stats.recipientsSynced += syncedIds.length;
-    }
-
-    // 5. Sync counters and check completion
-    await this.syncCounters(batchId, hotState);
-    await this.checkAndCompleteBatch(batchId, hotState);
   }
 
   /**
@@ -204,69 +322,52 @@ export class PostgresSyncService {
 
     const syncedIds: string[] = [];
 
-    // Group by status for efficient bulk updates
-    const sentRecipients: Array<{ id: string; sentAt: Date; providerMessageId: string }> = [];
-    const failedRecipients: Array<{ id: string; errorMessage: string }> = [];
-
-    for (const [recipientId, state] of states) {
-      if (state.status === "sent") {
-        sentRecipients.push({
-          id: recipientId,
-          sentAt: state.sentAt ? new Date(state.sentAt) : new Date(),
-          providerMessageId: state.providerMessageId || "",
-        });
-      } else if (state.status === "failed") {
-        failedRecipients.push({
-          id: recipientId,
-          errorMessage: state.errorMessage || "",
-        });
-      }
-    }
+    // Group by status using domain layer function for efficient bulk updates
+    const { sent: sentRecipients, failed: failedRecipients } = groupRecipientsByStatus(states);
 
     try {
-      // Bulk update sent recipients using SQL CASE for efficient single-query update
+      // Bulk update sent recipients using parameterized UNNEST (safe from SQL injection)
       if (sentRecipients.length > 0) {
         const sentIds = sentRecipients.map((r) => r.id);
+        const sentAts = sentRecipients.map((r) => r.sentAt.toISOString());
+        const providerMessageIds = sentRecipients.map((r) => r.providerMessageId);
 
-        // Build CASE expressions for varying fields
-        const sentAtCases = sentRecipients
-          .map((r) => `WHEN id = '${r.id}' THEN '${r.sentAt.toISOString()}'::timestamp`)
-          .join(" ");
-        const providerMessageIdCases = sentRecipients
-          .map((r) => `WHEN id = '${r.id}' THEN '${r.providerMessageId.replace(/'/g, "''")}'`)
-          .join(" ");
-        const idList = sentIds.map((id) => `'${id}'`).join(",");
-
-        // Single query to update all sent recipients with their individual values
+        // Use UNNEST with array parameters - fully parameterized, no SQL injection risk
         await db.execute(sql`
-          UPDATE recipients SET
+          UPDATE recipients AS r SET
             status = 'sent',
-            sent_at = CASE ${sql.raw(sentAtCases)} END,
-            provider_message_id = CASE ${sql.raw(providerMessageIdCases)} END,
+            sent_at = v.sent_at::timestamp,
+            provider_message_id = v.provider_message_id,
             updated_at = NOW()
-          WHERE id IN (${sql.raw(idList)})
+          FROM (
+            SELECT
+              UNNEST(${sentIds}::uuid[]) AS id,
+              UNNEST(${sentAts}::text[]) AS sent_at,
+              UNNEST(${providerMessageIds}::text[]) AS provider_message_id
+          ) AS v
+          WHERE r.id = v.id
         `);
 
         syncedIds.push(...sentIds);
       }
 
-      // Bulk update failed recipients using SQL CASE
+      // Bulk update failed recipients using parameterized UNNEST
       if (failedRecipients.length > 0) {
         const failedIds = failedRecipients.map((r) => r.id);
+        const errorMessages = failedRecipients.map((r) => r.errorMessage);
 
-        // Build CASE expression for error messages
-        const errorCases = failedRecipients
-          .map((r) => `WHEN id = '${r.id}' THEN '${r.errorMessage.replace(/'/g, "''")}'`)
-          .join(" ");
-        const idList = failedIds.map((id) => `'${id}'`).join(",");
-
-        // Single query to update all failed recipients
+        // Use UNNEST with array parameters - fully parameterized, no SQL injection risk
         await db.execute(sql`
-          UPDATE recipients SET
+          UPDATE recipients AS r SET
             status = 'failed',
-            error_message = CASE ${sql.raw(errorCases)} END,
+            error_message = v.error_message,
             updated_at = NOW()
-          WHERE id IN (${sql.raw(idList)})
+          FROM (
+            SELECT
+              UNNEST(${failedIds}::uuid[]) AS id,
+              UNNEST(${errorMessages}::text[]) AS error_message
+          ) AS v
+          WHERE r.id = v.id
         `);
 
         syncedIds.push(...failedIds);
@@ -358,10 +459,11 @@ export class PostgresSyncService {
   /**
    * Get service statistics
    */
-  getStats(): typeof this.stats & { isRunning: boolean } {
+  getStats(): typeof this.stats & { isRunning: boolean; batchesInFlight: string[] } {
     return {
       ...this.stats,
       isRunning: this.isRunning,
+      batchesInFlight: Array.from(this.batchesInFlight),
     };
   }
 

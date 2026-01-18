@@ -19,6 +19,7 @@ import {
   batchesProcessedTotal,
   clickhouseEventsTotal,
 } from "../metrics.js";
+import { calculateNatsBackoff, calculateBatchBackoff, calculateEmailBackoff } from "../domain/utils/backoff.js";
 
 // Provider rate limiters keyed by config ID
 const rateLimiters = new Map<string, ProviderRateLimiter>();
@@ -50,16 +51,14 @@ function getDefaultEmailConfig(): EmbeddedSendConfig {
 
 export class NatsEmailWorker {
   private activeConsumers = new Set<string>();
+  private consumerCreationLocks = new Map<string, Promise<void>>();
+  private runningConsumerPromises = new Map<string, Promise<void>>(); // Track running consumer loops
   private sc = StringCodec();
   private queueService: NatsQueueService;
   private isShuttingDown = false;
 
   constructor(private natsClient: NatsClient) {
     this.queueService = new NatsQueueService(natsClient);
-  }
-
-  private calculateBackoff(redeliveryCount: number, baseDelayMs = 1000, maxDelayMs = 30000): number {
-    return Math.min(baseDelayMs * Math.pow(2, redeliveryCount), maxDelayMs);
   }
 
   private buildMergedPayload(params: {
@@ -131,6 +130,27 @@ export class NatsEmailWorker {
   }): Promise<void> {
     const js = this.natsClient.getJetStream();
 
+    // Create and track the processor promise
+    const processorPromise = this.runConsumerLoop(consumerConfig, js);
+    this.runningConsumerPromises.set(consumerConfig.consumerName, processorPromise);
+
+    try {
+      await processorPromise;
+    } finally {
+      this.runningConsumerPromises.delete(consumerConfig.consumerName);
+      log.system.debug({ consumer: consumerConfig.consumerName }, "Consumer processor finished");
+    }
+  }
+
+  private async runConsumerLoop(
+    consumerConfig: {
+      consumerName: string;
+      maxMessages: number;
+      onMessage: (msg: JsMsg) => Promise<void>;
+      onError?: (msg: JsMsg, error: Error) => Promise<void>;
+    },
+    js: ReturnType<NatsClient["getJetStream"]>
+  ): Promise<void> {
     try {
       const consumer = await js.consumers.get("email-system", consumerConfig.consumerName);
       const messages = await consumer.consume({ max_messages: consumerConfig.maxMessages });
@@ -144,11 +164,20 @@ export class NatsEmailWorker {
           await consumerConfig.onMessage(msg);
           msg.ack();
         } catch (error) {
-          if (consumerConfig.onError) {
-            await consumerConfig.onError(msg, error as Error);
-          } else {
-            log.system.error({ error, seq: msg.seq, consumer: consumerConfig.consumerName }, "Message processing failed");
-            msg.nak(this.calculateBackoff(msg.info.redeliveryCount));
+          try {
+            if (consumerConfig.onError) {
+              await consumerConfig.onError(msg, error as Error);
+            } else {
+              log.system.error({ error, seq: msg.seq, consumer: consumerConfig.consumerName }, "Message processing failed");
+              msg.nak(calculateNatsBackoff(msg.info.redeliveryCount));
+            }
+          } catch (handlerError) {
+            // Error handler itself failed - log and NAK to prevent message loss
+            log.system.error(
+              { error: handlerError, originalError: error, seq: msg.seq, consumer: consumerConfig.consumerName },
+              "Error handler failed"
+            );
+            msg.nak(calculateNatsBackoff(msg.info.redeliveryCount));
           }
         }
       }
@@ -168,7 +197,7 @@ export class NatsEmailWorker {
       onMessage: (msg) => this.processBatchMessage(msg),
       onError: async (msg, error) => {
         log.batch.error({ error, seq: msg.seq }, "Failed to process batch");
-        msg.nak(this.calculateBackoff(msg.info.redeliveryCount, 5000, 60000));
+        msg.nak(calculateBatchBackoff(msg.info.redeliveryCount));
       },
     });
   }
@@ -247,7 +276,8 @@ export class NatsEmailWorker {
       await hotState.initializeBatch(batchId, pendingRecipients.length);
 
       // Buffered ClickHouse logging
-      const queuedEvents = pendingRecipients.map((r) => ({
+      type RecipientRow = typeof pendingRecipients[number];
+      const queuedEvents = pendingRecipients.map((r: RecipientRow) => ({
         event_type: "queued" as const,
         module_type: embeddedConfig.module,
         batch_id: batchId,
@@ -259,7 +289,7 @@ export class NatsEmailWorker {
       clickhouseEventsTotal.inc({ event_type: "queued" }, queuedEvents.length);
 
       // Create jobs
-      const jobs: JobData[] = pendingRecipients.map((r) => ({
+      const jobs: JobData[] = pendingRecipients.map((r: RecipientRow) => ({
         batchId,
         recipientId: r.id,
         userId,
@@ -285,6 +315,30 @@ export class NatsEmailWorker {
   }
 
   async ensureUserEmailProcessor(userId: string): Promise<void> {
+    // Fast path: already active
+    if (this.activeConsumers.has(userId)) return;
+
+    // Check if there's already a creation in progress for this user
+    const existingLock = this.consumerCreationLocks.get(userId);
+    if (existingLock) {
+      // Wait for the existing creation to complete
+      await existingLock;
+      return;
+    }
+
+    // Create a lock for this user's consumer creation
+    const creationPromise = this.createUserProcessor(userId);
+    this.consumerCreationLocks.set(userId, creationPromise);
+
+    try {
+      await creationPromise;
+    } finally {
+      this.consumerCreationLocks.delete(userId);
+    }
+  }
+
+  private async createUserProcessor(userId: string): Promise<void> {
+    // Double-check after acquiring lock (another call may have completed)
     if (this.activeConsumers.has(userId)) return;
 
     await this.natsClient.createUserConsumer(userId);
@@ -348,7 +402,21 @@ export class NatsEmailWorker {
       const hotState = getHotStateManager();
 
       // Idempotency check: skip if already processed
-      const existingStatus = await hotState.checkRecipientProcessed(batchId, recipientId);
+      // Try Dragonfly first, fall back to PostgreSQL if unavailable
+      let existingStatus: string | null = null;
+      try {
+        existingStatus = await hotState.checkRecipientProcessed(batchId, recipientId);
+      } catch (error) {
+        // Dragonfly unavailable - fall back to PostgreSQL
+        log.email.warn({ batchId, recipientId, error }, "Dragonfly unavailable for idempotency check, falling back to PostgreSQL");
+        const pgRecipient = await db.query.recipients.findFirst({
+          where: eq(recipients.id, recipientId),
+          columns: { status: true },
+        });
+        if (pgRecipient && (pgRecipient.status === "sent" || pgRecipient.status === "failed" || pgRecipient.status === "bounced" || pgRecipient.status === "complained")) {
+          existingStatus = pgRecipient.status;
+        }
+      }
       if (existingStatus) {
         log.email.debug({ batchId, recipientId, status: existingStatus }, "skipped (already processed)");
         return;
@@ -544,16 +612,32 @@ export class NatsEmailWorker {
 
   async shutdown(): Promise<void> {
     this.isShuttingDown = true;
-    log.system.info({ activeConsumers: this.activeConsumers.size }, "Shutting down NATS workers");
+    const runningCount = this.runningConsumerPromises.size;
+    log.system.info(
+      { activeConsumers: this.activeConsumers.size, runningConsumers: runningCount },
+      "Shutting down NATS workers, waiting for consumers to drain"
+    );
 
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    // Wait for all running consumer loops to finish (they check isShuttingDown flag)
+    // Use Promise.allSettled to wait for all, even if some fail
+    if (runningCount > 0) {
+      const consumerPromises = Array.from(this.runningConsumerPromises.values());
+      const results = await Promise.allSettled(consumerPromises);
 
+      const failed = results.filter((r) => r.status === "rejected");
+      if (failed.length > 0) {
+        log.system.warn({ failedCount: failed.length }, "Some consumers failed during shutdown");
+      }
+    }
+
+    // Close rate limiters
     for (const limiter of rateLimiters.values()) {
       await limiter.close();
     }
     rateLimiters.clear();
     this.activeConsumers.clear();
+    this.consumerCreationLocks.clear();
 
-    log.system.info("NATS workers shutdown complete");
+    log.system.info({}, "NATS workers shutdown complete");
   }
 }

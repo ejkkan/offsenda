@@ -200,12 +200,32 @@ try {
   rateLimiterService = new RateLimiterService();
   log.system.info({}, "rate limiter initialized");
 
-  // Test Dragonfly connection
+  // Test Dragonfly connection (rate limiter uses it)
   const dragonflyHealthy = await rateLimiterService.healthCheck();
   if (!dragonflyHealthy) {
-    log.system.error({}, "Dragonfly connection failed");
+    log.system.error({}, "Dragonfly connection failed for rate limiter");
     // Don't exit - fail open is acceptable for rate limiting
   }
+
+  // Initialize hot state manager BEFORE workers start (workers depend on it for idempotency)
+  const hotState = getHotStateManager({
+    completedBatchTtlMs: config.HOT_STATE_COMPLETED_TTL_HOURS * 60 * 60 * 1000,
+    activeBatchTtlMs: config.HOT_STATE_ACTIVE_TTL_DAYS * 24 * 60 * 60 * 1000,
+  });
+  const hotStateHealthy = await hotState.healthCheck();
+  if (!hotStateHealthy) {
+    log.system.error({}, "HotStateManager connection failed - Dragonfly required for message processing");
+    process.exit(1);
+  }
+  log.system.info({}, "HotStateManager initialized (Dragonfly connected)");
+
+  // Start buffered ClickHouse logger (workers use this for event logging)
+  const bufferedLogger = getBufferedLogger({
+    maxBufferSize: config.CLICKHOUSE_BUFFER_SIZE,
+    flushIntervalMs: config.CLICKHOUSE_FLUSH_INTERVAL_MS,
+  });
+  bufferedLogger.start();
+  log.system.info({}, "BufferedEventLogger started");
 
   // Start workers
   worker.startBatchProcessor().catch((error) => {
@@ -250,33 +270,13 @@ try {
   });
   auditService.start();
 
-  // Initialize hot state manager (Dragonfly for O(1) completion checks)
-  const hotState = getHotStateManager({
-    completedBatchTtlMs: config.HOT_STATE_COMPLETED_TTL_HOURS * 60 * 60 * 1000,
-    activeBatchTtlMs: config.HOT_STATE_ACTIVE_TTL_DAYS * 24 * 60 * 60 * 1000,
-  });
-  const hotStateHealthy = await hotState.healthCheck();
-  if (!hotStateHealthy) {
-    log.system.error({}, "HotStateManager connection failed - Dragonfly required");
-    process.exit(1);
-  }
-  log.system.info({}, "HotStateManager initialized");
-
-  // Start buffered ClickHouse logger
-  const bufferedLogger = getBufferedLogger({
-    maxBufferSize: config.CLICKHOUSE_BUFFER_SIZE,
-    flushIntervalMs: config.CLICKHOUSE_FLUSH_INTERVAL_MS,
-  });
-  bufferedLogger.start();
-  log.system.info({}, "BufferedEventLogger started");
-
   // Start PostgreSQL background sync service
   postgresSyncService = getPostgresSyncService({
     enabled: config.POSTGRES_SYNC_ENABLED,
     syncIntervalMs: config.POSTGRES_SYNC_INTERVAL_MS,
     maxRecipientsPerSync: config.POSTGRES_SYNC_BATCH_SIZE,
   });
-  postgresSyncService.start();
+  await postgresSyncService.start(); // Runs crash recovery then starts periodic sync
   log.system.info({}, "PostgresSyncService started");
 
   // Sync any queued batches from DB to NATS on startup
@@ -344,26 +344,31 @@ async function shutdown() {
 
   const shutdownStart = Date.now();
 
-  // Stop scheduler (sync, no timeout needed)
+  // Phase 1: Stop accepting new work
+  log.system.debug({}, "Phase 1: Stop accepting new work");
+  await withTimeout(app.close(), 2000, "Fastify"); // Stop HTTP server first
   scheduler.stop();
   batchRecovery.stop();
 
-  // Stop services with timeout protection
-  await withTimeout(auditService.stop(), 5000, "AuditService");
+  // Phase 2: Drain in-flight work
+  log.system.debug({}, "Phase 2: Drain workers");
   await withTimeout(worker.shutdown(), 10000, "NatsWorker");
+
+  // Phase 3: Sync state to durable storage (while Dragonfly still available)
+  log.system.debug({}, "Phase 3: Sync to durable storage");
   await withTimeout(postgresSyncService.stop(), 5000, "PostgresSyncService");
 
-  // Stop buffered logger (flushes remaining events)
+  // Phase 4: Flush buffered events (while ClickHouse still available)
+  log.system.debug({}, "Phase 4: Flush events");
   const bufferedLogger = getBufferedLogger();
   await withTimeout(bufferedLogger.stop(), 5000, "BufferedEventLogger");
+  await withTimeout(auditService.stop(), 5000, "AuditService");
 
-  // Close hot state manager
+  // Phase 5: Close all connections
+  log.system.debug({}, "Phase 5: Close connections");
   const hotState = getHotStateManager();
   await withTimeout(hotState.close(), 2000, "HotStateManager");
-
-  // Close connections
   await withTimeout(rateLimiterService.close(), 2000, "RateLimiter");
-  await withTimeout(app.close(), 2000, "Fastify");
   await withTimeout(natsClient.close(), 2000, "NATS");
   await withTimeout(clickhouse.close(), 2000, "ClickHouse");
 

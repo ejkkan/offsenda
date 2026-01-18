@@ -16,17 +16,18 @@ import {
 import { config } from "../config.js";
 import { log } from "../logger.js";
 import { readFileSync } from "node:fs";
+import { calculateBackoff } from "../domain/utils/backoff.js";
 
 export class NatsClient {
   private nc: NatsConnection | null = null;
   private js: JetStreamClient | null = null;
   private jsm: JetStreamManager | null = null;
   private sc = StringCodec();
+  private isClosing = false;
 
   async connect(): Promise<void> {
     const servers = config.NATS_CLUSTER?.split(",") || ["nats://localhost:4222"];
     const maxRetries = 10;
-    const baseDelay = 1000; // 1 second
 
     // Build connection options
     const connectionOptions: ConnectionOptions = {
@@ -72,8 +73,13 @@ export class NatsClient {
 
         // Set up event handlers
         this.nc.closed().then(() => {
-          log.system.error("NATS connection closed");
-          process.exit(1);
+          if (!this.isClosing) {
+            // Unexpected closure - trigger graceful shutdown instead of immediate exit
+            log.system.error({}, "NATS connection closed unexpectedly, initiating graceful shutdown");
+            process.emit('SIGTERM');
+          } else {
+            log.system.info({}, "NATS connection closed (expected during shutdown)");
+          }
         });
 
         (async () => {
@@ -96,7 +102,7 @@ export class NatsClient {
         }
 
         // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s (capped at 32s)
-        const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), 32000);
+        const delay = calculateBackoff(attempt - 1, { baseDelayMs: 1000, maxDelayMs: 32000 });
         log.system.warn({ error, attempt, maxRetries, retryInMs: delay }, "NATS connection failed, retrying");
 
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -228,10 +234,11 @@ export class NatsClient {
   }
 
   async close(): Promise<void> {
+    this.isClosing = true;
     if (this.nc) {
       await this.nc.drain();
       await this.nc.close();
-      log.system.info("NATS connection closed gracefully");
+      log.system.info({}, "NATS connection closed gracefully");
     }
   }
 
