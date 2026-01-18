@@ -1,4 +1,5 @@
 import { log, createTimer } from "../logger.js";
+import { getSharedCircuitBreaker, SharedCircuitBreaker, CircuitState } from "./shared-circuit-breaker.js";
 
 // =============================================================================
 // Resilient HTTP Client
@@ -106,22 +107,6 @@ export interface ResilientClientConfig {
 }
 
 /**
- * Circuit breaker states
- */
-type CircuitState = "closed" | "open" | "half-open";
-
-/**
- * Internal circuit breaker state
- */
-interface CircuitBreakerState {
-  state: CircuitState;
-  failures: number;
-  successes: number;
-  lastFailureTime: number;
-  failureTimestamps: number[];
-}
-
-/**
  * Request result with retry info
  */
 export interface RequestResult<T = unknown> {
@@ -183,7 +168,7 @@ const DEFAULT_CONFIG: ResilientClientConfig = {
  */
 export class ResilientHttpClient {
   private config: ResilientClientConfig;
-  private circuits: Map<string, CircuitBreakerState> = new Map();
+  private sharedCircuitBreaker: SharedCircuitBreaker;
 
   constructor(config: Partial<ResilientClientConfig> = {}) {
     this.config = {
@@ -193,6 +178,7 @@ export class ResilientHttpClient {
       circuitBreaker: { ...DEFAULT_CIRCUIT_BREAKER, ...config.circuitBreaker },
       defaultHeaders: { ...DEFAULT_CONFIG.defaultHeaders, ...config.defaultHeaders },
     };
+    this.sharedCircuitBreaker = getSharedCircuitBreaker();
   }
 
   /**
@@ -206,11 +192,11 @@ export class ResilientHttpClient {
     const host = new URL(url).host;
     let attempts = 0;
 
-    // Check circuit breaker
+    // Check circuit breaker (shared across all pods via Dragonfly)
     if (this.config.circuitBreaker.enabled) {
-      const circuitState = this.getCircuitState(host);
+      const isOpen = await this.sharedCircuitBreaker.isOpen(host);
 
-      if (circuitState === "open") {
+      if (isOpen) {
         return {
           success: false,
           error: `Circuit breaker open for ${host}`,
@@ -239,9 +225,9 @@ export class ResilientHttpClient {
 
         // Check if response is successful or should retry
         if (response.ok || !this.shouldRetry(response.status, attempt)) {
-          // Record success for circuit breaker
+          // Record success for circuit breaker (async, don't await to avoid latency)
           if (this.config.circuitBreaker.enabled) {
-            this.recordSuccess(host);
+            this.sharedCircuitBreaker.recordSuccess(host).catch(() => {});
           }
 
           return {
@@ -253,9 +239,9 @@ export class ResilientHttpClient {
           };
         }
 
-        // Record failure for circuit breaker
+        // Record failure for circuit breaker (async, don't await to avoid latency)
         if (this.config.circuitBreaker.enabled) {
-          this.recordFailure(host);
+          this.sharedCircuitBreaker.recordFailure(host).catch(() => {});
         }
 
         lastError = this.classifyError(response.status);
@@ -270,9 +256,9 @@ export class ResilientHttpClient {
           (isNetworkError && this.config.retry.retryOnNetworkError);
 
         if (!shouldRetry || attempt >= this.config.retry.maxRetries) {
-          // Record failure for circuit breaker
+          // Record failure for circuit breaker (async, don't await to avoid latency)
           if (this.config.circuitBreaker.enabled) {
-            this.recordFailure(host);
+            this.sharedCircuitBreaker.recordFailure(host).catch(() => {});
           }
 
           return {
@@ -289,9 +275,9 @@ export class ResilientHttpClient {
           retryable: true,
         };
 
-        // Record failure for circuit breaker
+        // Record failure for circuit breaker (async, don't await to avoid latency)
         if (this.config.circuitBreaker.enabled) {
-          this.recordFailure(host);
+          this.sharedCircuitBreaker.recordFailure(host).catch(() => {});
         }
       }
     }
@@ -418,121 +404,24 @@ export class ResilientHttpClient {
   }
 
   /**
-   * Get circuit breaker state for a host
+   * Get circuit breaker status for monitoring (async - uses shared Dragonfly state)
    */
-  private getCircuitState(host: string): CircuitState {
-    const circuit = this.circuits.get(host);
-
-    if (!circuit) {
-      return "closed";
-    }
-
-    // Check if open circuit should transition to half-open
-    if (circuit.state === "open") {
-      const timeSinceLastFailure = Date.now() - circuit.lastFailureTime;
-      if (timeSinceLastFailure >= this.config.circuitBreaker.resetTimeoutMs) {
-        circuit.state = "half-open";
-        circuit.successes = 0;
-      }
-    }
-
-    return circuit.state;
+  async getCircuitStatus(): Promise<Map<string, { state: CircuitState; failures: number }>> {
+    return this.sharedCircuitBreaker.getStatus();
   }
 
   /**
-   * Record a successful request for circuit breaker
+   * Reset circuit breaker for a specific host (async - uses shared Dragonfly state)
    */
-  private recordSuccess(host: string): void {
-    const circuit = this.circuits.get(host);
-
-    if (!circuit) {
-      return;
-    }
-
-    if (circuit.state === "half-open") {
-      circuit.successes++;
-      if (circuit.successes >= this.config.circuitBreaker.successThreshold) {
-        // Close the circuit
-        circuit.state = "closed";
-        circuit.failures = 0;
-        circuit.failureTimestamps = [];
-        log.system.info({ host }, "circuit breaker closed");
-      }
-    } else if (circuit.state === "closed") {
-      // Reset failures on success
-      circuit.failures = 0;
-      circuit.failureTimestamps = [];
-    }
+  async resetCircuit(host: string): Promise<void> {
+    await this.sharedCircuitBreaker.reset(host);
   }
 
   /**
-   * Record a failed request for circuit breaker
+   * Reset all circuit breakers (async - uses shared Dragonfly state)
    */
-  private recordFailure(host: string): void {
-    let circuit = this.circuits.get(host);
-
-    if (!circuit) {
-      circuit = {
-        state: "closed",
-        failures: 0,
-        successes: 0,
-        lastFailureTime: 0,
-        failureTimestamps: [],
-      };
-      this.circuits.set(host, circuit);
-    }
-
-    const now = Date.now();
-    circuit.lastFailureTime = now;
-    circuit.failureTimestamps.push(now);
-
-    // Remove old failures outside the window
-    const windowStart = now - this.config.circuitBreaker.failureWindowMs;
-    circuit.failureTimestamps = circuit.failureTimestamps.filter((t) => t > windowStart);
-    circuit.failures = circuit.failureTimestamps.length;
-
-    // Check if circuit should open
-    if (circuit.state === "closed" || circuit.state === "half-open") {
-      if (circuit.failures >= this.config.circuitBreaker.failureThreshold) {
-        circuit.state = "open";
-        log.system.warn(
-          { host, failures: circuit.failures },
-          "circuit breaker opened"
-        );
-      }
-    }
-  }
-
-  /**
-   * Get circuit breaker status for monitoring
-   */
-  getCircuitStatus(): Map<string, { state: CircuitState; failures: number }> {
-    const status = new Map<string, { state: CircuitState; failures: number }>();
-
-    for (const [host, circuit] of this.circuits) {
-      status.set(host, {
-        state: this.getCircuitState(host),
-        failures: circuit.failures,
-      });
-    }
-
-    return status;
-  }
-
-  /**
-   * Reset circuit breaker for a specific host
-   */
-  resetCircuit(host: string): void {
-    this.circuits.delete(host);
-    log.system.info({ host }, "circuit breaker reset");
-  }
-
-  /**
-   * Reset all circuit breakers
-   */
-  resetAllCircuits(): void {
-    this.circuits.clear();
-    log.system.info({}, "all circuit breakers reset");
+  async resetAllCircuits(): Promise<void> {
+    await this.sharedCircuitBreaker.resetAll();
   }
 
   /**

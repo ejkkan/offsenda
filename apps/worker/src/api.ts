@@ -904,8 +904,8 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   app.post("/api/test-webhook/reset-circuits", async (request, reply) => {
     const webhookModule = getModule("webhook");
     if (webhookModule && "resetAllCircuits" in webhookModule) {
-      (webhookModule as any).resetAllCircuits();
+      await (webhookModule as any).resetAllCircuits();
     }
-    return reply.send({ success: true, message: "All circuit breakers reset" });
+    return reply.send({ success: true, message: "All circuit breakers reset (shared across all pods)" });
   });
 }

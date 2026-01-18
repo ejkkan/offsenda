@@ -243,21 +243,21 @@ export class WebhookModule implements Module {
   /**
    * Get circuit breaker status for all endpoints (for monitoring)
    */
-  getCircuitStatus(): Map<string, { state: string; failures: number }> {
+  async getCircuitStatus(): Promise<Map<string, { state: string; failures: number }>> {
     return this.httpClient.getCircuitStatus();
   }
 
   /**
    * Reset circuit breaker for a specific endpoint
    */
-  resetCircuit(host: string): void {
-    this.httpClient.resetCircuit(host);
+  async resetCircuit(host: string): Promise<void> {
+    await this.httpClient.resetCircuit(host);
   }
 
   /**
    * Reset all circuit breakers
    */
-  resetAllCircuits(): void {
-    this.httpClient.resetAllCircuits();
+  async resetAllCircuits(): Promise<void> {
+    await this.httpClient.resetAllCircuits();
   }
 }
