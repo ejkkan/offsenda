@@ -58,25 +58,76 @@ export class ProviderRateLimiter {
    */
   async acquire(timeout: number = 5000): Promise<boolean> {
     const startTime = Date.now();
+    let attempt = 0;
 
     while (Date.now() - startTime < timeout) {
-      if (await this.tryAcquire()) {
+      const result = await this.tryAcquireWithWait();
+      if (result.acquired) {
         return true;
       }
 
-      // Wait a bit before retrying (adaptive backoff)
-      const elapsed = Date.now() - startTime;
-      const waitTime = Math.min(50, timeout - elapsed);
+      // Calculate optimal wait time based on token refill rate
+      // Instead of busy-waiting every 50ms, wait for tokens to actually refill
+      const tokensNeeded = 1 - result.currentTokens;
+      const refillTimeMs = (tokensNeeded / this.tokensPerSecond) * 1000;
+
+      // Add small jitter to prevent thundering herd
+      const jitter = Math.random() * 10;
+      const waitTime = Math.min(
+        Math.max(refillTimeMs, 10) + jitter,
+        timeout - (Date.now() - startTime)
+      );
+
+      if (waitTime <= 0) break;
+
       await new Promise(resolve => setTimeout(resolve, waitTime));
+      attempt++;
     }
 
     log.rateLimit.warn({
       provider: this.provider,
       timeout,
-      limit: this.tokensPerSecond
+      limit: this.tokensPerSecond,
+      attempts: attempt
     }, "Rate limit timeout - no tokens available");
 
     return false;
+  }
+
+  /**
+   * Acquire multiple tokens at once (for bulk operations)
+   *
+   * @param count - Number of tokens to acquire
+   * @param timeout - Max time to wait (ms)
+   * @returns Number of tokens actually acquired (may be less than requested)
+   */
+  async acquireBulk(count: number, timeout: number = 5000): Promise<number> {
+    const startTime = Date.now();
+    let acquired = 0;
+
+    while (acquired < count && Date.now() - startTime < timeout) {
+      const result = await this.tryAcquireBulk(count - acquired);
+      acquired += result.acquired;
+
+      if (acquired >= count) {
+        return acquired;
+      }
+
+      // Wait for more tokens
+      const tokensNeeded = 1;
+      const refillTimeMs = (tokensNeeded / this.tokensPerSecond) * 1000;
+      const jitter = Math.random() * 10;
+      const waitTime = Math.min(
+        Math.max(refillTimeMs, 10) + jitter,
+        timeout - (Date.now() - startTime)
+      );
+
+      if (waitTime <= 0) break;
+
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+
+    return acquired;
   }
 
   /**
@@ -84,11 +135,20 @@ export class ProviderRateLimiter {
    * Returns true if successful, false if rate limited
    */
   private async tryAcquire(): Promise<boolean> {
+    const result = await this.tryAcquireWithWait();
+    return result.acquired;
+  }
+
+  /**
+   * Try to acquire a token and return current token count for wait calculation
+   */
+  private async tryAcquireWithWait(): Promise<{ acquired: boolean; currentTokens: number }> {
     const now = Date.now();
     const key = `${this.keyPrefix}:bucket`;
 
     try {
       // Lua script for atomic token bucket operation
+      // Returns: [acquired (0/1), current_tokens]
       const script = `
         local key = KEYS[1]
         local now = tonumber(ARGV[1])
@@ -110,12 +170,12 @@ export class ProviderRateLimiter {
           tokens = tokens - 1
           redis.call('HMSET', key, 'tokens', tokens, 'last_update', now)
           redis.call('EXPIRE', key, 10)  -- Auto-expire after 10 seconds of inactivity
-          return 1  -- Success
+          return {1, tokens}  -- Success
         else
           -- Not enough tokens, update state anyway
           redis.call('HMSET', key, 'tokens', tokens, 'last_update', now)
           redis.call('EXPIRE', key, 10)
-          return 0  -- Rate limited
+          return {0, tokens}  -- Rate limited
         end
       `;
 
@@ -126,9 +186,12 @@ export class ProviderRateLimiter {
         now.toString(),
         this.tokensPerSecond.toString(),
         this.burstCapacity.toString()
-      ) as number;
+      ) as [number, number];
 
-      return result === 1;
+      return {
+        acquired: result[0] === 1,
+        currentTokens: result[1],
+      };
 
     } catch (error) {
       // Fail open - allow request if rate limiter is down
@@ -136,7 +199,69 @@ export class ProviderRateLimiter {
         error,
         provider: this.provider
       }, "Provider rate limit check failed, allowing request");
-      return true;
+      return { acquired: true, currentTokens: this.burstCapacity };
+    }
+  }
+
+  /**
+   * Try to acquire multiple tokens at once (for bulk operations)
+   */
+  private async tryAcquireBulk(maxCount: number): Promise<{ acquired: number; remaining: number }> {
+    const now = Date.now();
+    const key = `${this.keyPrefix}:bucket`;
+
+    try {
+      // Lua script for bulk token acquisition
+      // Returns: [acquired_count, remaining_tokens]
+      const script = `
+        local key = KEYS[1]
+        local now = tonumber(ARGV[1])
+        local rate = tonumber(ARGV[2])
+        local capacity = tonumber(ARGV[3])
+        local max_count = tonumber(ARGV[4])
+
+        -- Get current bucket state
+        local bucket = redis.call('HMGET', key, 'tokens', 'last_update')
+        local tokens = tonumber(bucket[1]) or capacity
+        local last_update = tonumber(bucket[2]) or now
+
+        -- Calculate tokens to add based on time elapsed
+        local elapsed = (now - last_update) / 1000  -- Convert to seconds
+        local tokens_to_add = elapsed * rate
+        tokens = math.min(capacity, tokens + tokens_to_add)
+
+        -- Consume as many tokens as possible (up to max_count)
+        local to_consume = math.min(math.floor(tokens), max_count)
+        tokens = tokens - to_consume
+
+        redis.call('HMSET', key, 'tokens', tokens, 'last_update', now)
+        redis.call('EXPIRE', key, 10)
+
+        return {to_consume, tokens}
+      `;
+
+      const result = await this.redis.eval(
+        script,
+        1,
+        key,
+        now.toString(),
+        this.tokensPerSecond.toString(),
+        this.burstCapacity.toString(),
+        maxCount.toString()
+      ) as [number, number];
+
+      return {
+        acquired: result[0],
+        remaining: result[1],
+      };
+
+    } catch (error) {
+      // Fail open - allow all requests if rate limiter is down
+      log.rateLimit.error({
+        error,
+        provider: this.provider
+      }, "Provider bulk rate limit check failed, allowing all requests");
+      return { acquired: maxCount, remaining: this.burstCapacity };
     }
   }
 

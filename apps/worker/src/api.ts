@@ -851,6 +851,104 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   app.get("/api/metrics", metricsHandler);
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // DETAILED HEALTH ENDPOINT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // GET /health/detailed - Detailed component health status
+  app.get("/health/detailed", async (request, reply) => {
+    const { getHotStateManager } = await import("./hot-state-manager.js");
+    const { getBufferedLogger } = await import("./buffered-logger.js");
+    const { getPostgresSyncService } = await import("./services/postgres-sync.js");
+    const { clickhouse } = await import("./clickhouse.js");
+
+    const components: Record<string, { status: "healthy" | "degraded" | "unhealthy"; details?: unknown }> = {};
+    let overallHealthy = true;
+
+    // 1. NATS
+    try {
+      const natsHealthy = await natsClient.healthCheck();
+      components.nats = { status: natsHealthy ? "healthy" : "unhealthy" };
+      if (!natsHealthy) overallHealthy = false;
+    } catch (error) {
+      components.nats = { status: "unhealthy", details: (error as Error).message };
+      overallHealthy = false;
+    }
+
+    // 2. Dragonfly (Hot State Manager)
+    try {
+      const hotState = getHotStateManager();
+      const circuitState = hotState.getCircuitState();
+      const isHealthy = await hotState.healthCheck();
+
+      if (!isHealthy) {
+        components.dragonfly = { status: "unhealthy", details: "connection failed" };
+        overallHealthy = false;
+      } else if (circuitState.state === "open") {
+        components.dragonfly = { status: "degraded", details: { circuit: circuitState } };
+      } else {
+        components.dragonfly = { status: "healthy", details: { circuit: circuitState } };
+      }
+    } catch (error) {
+      components.dragonfly = { status: "unhealthy", details: (error as Error).message };
+      overallHealthy = false;
+    }
+
+    // 3. ClickHouse
+    try {
+      await clickhouse.query({ query: "SELECT 1", format: "JSONEachRow" });
+      const loggerStats = getBufferedLogger().getStats();
+      components.clickhouse = {
+        status: "healthy",
+        details: {
+          bufferSize: loggerStats.bufferSize,
+          failedFlushes: loggerStats.failedFlushes,
+        },
+      };
+    } catch (error) {
+      components.clickhouse = { status: "unhealthy", details: (error as Error).message };
+      // ClickHouse being down is degraded, not critical (events are buffered)
+    }
+
+    // 4. PostgreSQL Sync Service
+    try {
+      const syncService = getPostgresSyncService();
+      const syncStats = syncService.getStats();
+      components.postgresSync = {
+        status: syncStats.errors > 10 ? "degraded" : "healthy",
+        details: {
+          syncCycles: syncStats.syncCycles,
+          recipientsSynced: syncStats.recipientsSynced,
+          errors: syncStats.errors,
+          isRunning: syncStats.isRunning,
+        },
+      };
+    } catch (error) {
+      components.postgresSync = { status: "degraded", details: (error as Error).message };
+    }
+
+    // 5. Queue Stats
+    try {
+      const queueStats = await queueService.getQueueStats();
+      components.queue = {
+        status: "healthy",
+        details: {
+          batchesPending: queueStats.batch.pending,
+          emailsPending: queueStats.email.pending,
+        },
+      };
+    } catch (error) {
+      components.queue = { status: "degraded", details: (error as Error).message };
+    }
+
+    const status = overallHealthy ? 200 : 503;
+    return reply.status(status).send({
+      status: overallHealthy ? "healthy" : "unhealthy",
+      timestamp: new Date().toISOString(),
+      components,
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // TEST WEBHOOK ENDPOINTS (for stress/load testing)
   // ═══════════════════════════════════════════════════════════════════════════
 

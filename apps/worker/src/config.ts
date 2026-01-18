@@ -104,6 +104,22 @@ const envSchema = z.object({
   AUDIT_LOG_TO_CONSOLE: stringBoolean.default(false),
   AUDIT_BATCH_SIZE: z.coerce.number().default(100),
   AUDIT_FLUSH_INTERVAL_MS: z.coerce.number().default(5000), // 5 seconds
+
+  // =============================================================================
+  // High-Throughput Processing
+  // =============================================================================
+  // Buffered ClickHouse logging
+  CLICKHOUSE_BUFFER_SIZE: z.coerce.number().default(10000), // Max events before forced flush
+  CLICKHOUSE_FLUSH_INTERVAL_MS: z.coerce.number().default(5000), // 5 seconds
+
+  // Hot state manager (Dragonfly) - required for high-throughput processing
+  HOT_STATE_COMPLETED_TTL_HOURS: z.coerce.number().default(48), // TTL for completed batches
+  HOT_STATE_ACTIVE_TTL_DAYS: z.coerce.number().default(7), // TTL for active batches
+
+  // PostgreSQL background sync - syncs hot state to PostgreSQL
+  POSTGRES_SYNC_ENABLED: stringBoolean.default(true),
+  POSTGRES_SYNC_INTERVAL_MS: z.coerce.number().default(2000), // 2 seconds
+  POSTGRES_SYNC_BATCH_SIZE: z.coerce.number().default(1000), // Max recipients per sync cycle
 });
 
 function loadConfig() {

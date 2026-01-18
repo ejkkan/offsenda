@@ -18,6 +18,11 @@ import { NatsEmailWorker } from "./nats/workers.js";
 import { SchedulerService } from "./services/scheduler.js";
 import { BatchRecoveryService } from "./services/batch-recovery.js";
 import { AuditService, getAuditService } from "./services/audit.js";
+import { PostgresSyncService, getPostgresSyncService } from "./services/postgres-sync.js";
+
+// High-throughput components
+import { getBufferedLogger } from "./buffered-logger.js";
+import { getHotStateManager } from "./hot-state-manager.js";
 
 const app = Fastify({
   logger: false,  // We use our own structured logger
@@ -121,6 +126,7 @@ let worker: NatsEmailWorker;
 let scheduler: SchedulerService;
 let batchRecovery: BatchRecoveryService;
 let auditService: AuditService;
+let postgresSyncService: PostgresSyncService;
 
 // Register routes
 await registerWebhooks(app);
@@ -244,6 +250,35 @@ try {
   });
   auditService.start();
 
+  // Initialize hot state manager (Dragonfly for O(1) completion checks)
+  const hotState = getHotStateManager({
+    completedBatchTtlMs: config.HOT_STATE_COMPLETED_TTL_HOURS * 60 * 60 * 1000,
+    activeBatchTtlMs: config.HOT_STATE_ACTIVE_TTL_DAYS * 24 * 60 * 60 * 1000,
+  });
+  const hotStateHealthy = await hotState.healthCheck();
+  if (!hotStateHealthy) {
+    log.system.error({}, "HotStateManager connection failed - Dragonfly required");
+    process.exit(1);
+  }
+  log.system.info({}, "HotStateManager initialized");
+
+  // Start buffered ClickHouse logger
+  const bufferedLogger = getBufferedLogger({
+    maxBufferSize: config.CLICKHOUSE_BUFFER_SIZE,
+    flushIntervalMs: config.CLICKHOUSE_FLUSH_INTERVAL_MS,
+  });
+  bufferedLogger.start();
+  log.system.info({}, "BufferedEventLogger started");
+
+  // Start PostgreSQL background sync service
+  postgresSyncService = getPostgresSyncService({
+    enabled: config.POSTGRES_SYNC_ENABLED,
+    syncIntervalMs: config.POSTGRES_SYNC_INTERVAL_MS,
+    maxRecipientsPerSync: config.POSTGRES_SYNC_BATCH_SIZE,
+  });
+  postgresSyncService.start();
+  log.system.info({}, "PostgresSyncService started");
+
   // Sync any queued batches from DB to NATS on startup
   await syncQueuedBatchesToQueue();
 
@@ -289,31 +324,73 @@ try {
   process.exit(1);
 }
 
-// Graceful shutdown
+// Graceful shutdown with timeout protection
+const SHUTDOWN_TIMEOUT_MS = 30000; // 30 seconds max for graceful shutdown
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, name: string): Promise<T | void> {
+  const timeout = new Promise<void>((_, reject) => {
+    setTimeout(() => reject(new Error(`${name} timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } catch (error) {
+    log.system.warn({ error: (error as Error).message, component: name }, "shutdown timeout");
+  }
+}
+
 async function shutdown() {
-  log.system.info({}, "shutting down");
+  log.system.info({}, "shutting down (30s timeout)");
 
-  // Stop scheduler
+  const shutdownStart = Date.now();
+
+  // Stop scheduler (sync, no timeout needed)
   scheduler.stop();
-
-  // Stop batch recovery
   batchRecovery.stop();
 
-  // Stop audit service (flush remaining events)
-  await auditService.stop();
+  // Stop services with timeout protection
+  await withTimeout(auditService.stop(), 5000, "AuditService");
+  await withTimeout(worker.shutdown(), 10000, "NatsWorker");
+  await withTimeout(postgresSyncService.stop(), 5000, "PostgresSyncService");
 
-  // Stop accepting new work
-  await worker.shutdown();
+  // Stop buffered logger (flushes remaining events)
+  const bufferedLogger = getBufferedLogger();
+  await withTimeout(bufferedLogger.stop(), 5000, "BufferedEventLogger");
+
+  // Close hot state manager
+  const hotState = getHotStateManager();
+  await withTimeout(hotState.close(), 2000, "HotStateManager");
 
   // Close connections
-  await rateLimiterService.close();
-  await app.close();
-  await natsClient.close();
-  await clickhouse.close();
+  await withTimeout(rateLimiterService.close(), 2000, "RateLimiter");
+  await withTimeout(app.close(), 2000, "Fastify");
+  await withTimeout(natsClient.close(), 2000, "NATS");
+  await withTimeout(clickhouse.close(), 2000, "ClickHouse");
 
-  log.system.info({}, "shutdown complete");
+  const duration = Date.now() - shutdownStart;
+  log.system.info({ durationMs: duration }, "shutdown complete");
+
   process.exit(0);
 }
 
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+// Force exit if graceful shutdown takes too long
+let shutdownInProgress = false;
+async function initiateShutdown() {
+  if (shutdownInProgress) {
+    log.system.warn({}, "shutdown already in progress, forcing exit");
+    process.exit(1);
+  }
+  shutdownInProgress = true;
+
+  // Set hard timeout
+  const forceExitTimer = setTimeout(() => {
+    log.system.error({}, "shutdown timeout exceeded, forcing exit");
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  forceExitTimer.unref(); // Don't keep process alive
+
+  await shutdown();
+}
+
+process.on("SIGTERM", initiateShutdown);
+process.on("SIGINT", initiateShutdown);
