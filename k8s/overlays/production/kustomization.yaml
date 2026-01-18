@@ -46,6 +46,9 @@ patches:
     - op: replace
       path: /data/NATS_CLUSTER
       value: "tls://nats.batchsender.svc:4222"
+    - op: add
+      path: /data/ENABLE_TEST_SETUP_API
+      value: "true"
   target:
     kind: ConfigMap
     name: worker-config
