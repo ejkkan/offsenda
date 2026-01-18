@@ -899,4 +899,13 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
     testWebhookStats.lastPayloads = [];
     return reply.send({ success: true });
   });
+
+  // POST /api/test-webhook/reset-circuits - Reset all circuit breakers (for testing)
+  app.post("/api/test-webhook/reset-circuits", async (request, reply) => {
+    const webhookModule = getModule("webhook");
+    if (webhookModule && "resetAllCircuits" in webhookModule) {
+      (webhookModule as any).resetAllCircuits();
+    }
+    return reply.send({ success: true, message: "All circuit breakers reset" });
+  });
 }
