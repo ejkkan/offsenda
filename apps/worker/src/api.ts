@@ -850,7 +850,7 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
   app.get("/api/metrics", metricsHandler);
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // TEST WEBHOOK ENDPOINTS (for load testing)
+  // TEST WEBHOOK ENDPOINTS (for stress/load testing)
   // ═══════════════════════════════════════════════════════════════════════════
 
   // In-memory stats storage
