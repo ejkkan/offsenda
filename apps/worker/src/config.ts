@@ -16,6 +16,7 @@ const envSchema = z.object({
   // NATS JetStream
   NATS_CLUSTER: z.string().default("nats://localhost:4222"),
   NATS_REPLICAS: z.coerce.number().min(1).max(5).default(1),
+  NATS_MAX_MSGS_PER_SUBJECT: z.coerce.number().default(1_000_000), // Max messages per user queue (enterprise: 1M)
   NATS_TLS_ENABLED: stringBoolean.default(false),
   NATS_TLS_CA_FILE: z.string().optional(), // Path to CA cert for verification
   NATS_TLS_CERT_FILE: z.string().optional(), // Path to client cert (if mutual TLS)

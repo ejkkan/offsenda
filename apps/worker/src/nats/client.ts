@@ -129,7 +129,7 @@ export class NatsClient {
           num_replicas: config.NATS_REPLICAS,
           max_age: 2 * 60 * 60 * 1e9, // 2 hours in nanoseconds
           discard: DiscardPolicy.Old,
-          max_msgs_per_subject: 50000,
+          max_msgs_per_subject: config.NATS_MAX_MSGS_PER_SUBJECT,
           duplicate_window: 2 * 60 * 1e9, // 2 minutes deduplication window
           deny_delete: true, // Prevent accidental stream deletion
           deny_purge: true, // Prevent accidental purge
