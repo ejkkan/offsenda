@@ -326,51 +326,47 @@ export class PostgresSyncService {
     const { sent: sentRecipients, failed: failedRecipients } = groupRecipientsByStatus(states);
 
     try {
-      // Bulk update sent recipients using parameterized UNNEST (safe from SQL injection)
+      // Bulk update sent recipients using json_to_recordset (safe from SQL injection)
+      // This approach passes a single JSON parameter that PostgreSQL unpacks into rows
       if (sentRecipients.length > 0) {
-        const sentIds = sentRecipients.map((r) => r.id);
-        const sentAts = sentRecipients.map((r) => r.sentAt.toISOString());
-        const providerMessageIds = sentRecipients.map((r) => r.providerMessageId);
+        const sentData = sentRecipients.map((r) => ({
+          id: r.id,
+          sent_at: r.sentAt.toISOString(),
+          provider_message_id: r.providerMessageId,
+        }));
+        const sentJson = JSON.stringify(sentData);
 
-        // Use UNNEST with array parameters - fully parameterized, no SQL injection risk
         await db.execute(sql`
           UPDATE recipients AS r SET
             status = 'sent',
-            sent_at = v.sent_at::timestamp,
+            sent_at = v.sent_at,
             provider_message_id = v.provider_message_id,
             updated_at = NOW()
-          FROM (
-            SELECT
-              UNNEST(${sentIds}::uuid[]) AS id,
-              UNNEST(${sentAts}::text[]) AS sent_at,
-              UNNEST(${providerMessageIds}::text[]) AS provider_message_id
-          ) AS v
+          FROM json_to_recordset(${sentJson}::json) AS v(id uuid, sent_at timestamp, provider_message_id text)
           WHERE r.id = v.id
         `);
 
-        syncedIds.push(...sentIds);
+        syncedIds.push(...sentRecipients.map((r) => r.id));
       }
 
-      // Bulk update failed recipients using parameterized UNNEST
+      // Bulk update failed recipients using json_to_recordset
       if (failedRecipients.length > 0) {
-        const failedIds = failedRecipients.map((r) => r.id);
-        const errorMessages = failedRecipients.map((r) => r.errorMessage);
+        const failedData = failedRecipients.map((r) => ({
+          id: r.id,
+          error_message: r.errorMessage,
+        }));
+        const failedJson = JSON.stringify(failedData);
 
-        // Use UNNEST with array parameters - fully parameterized, no SQL injection risk
         await db.execute(sql`
           UPDATE recipients AS r SET
             status = 'failed',
             error_message = v.error_message,
             updated_at = NOW()
-          FROM (
-            SELECT
-              UNNEST(${failedIds}::uuid[]) AS id,
-              UNNEST(${errorMessages}::text[]) AS error_message
-          ) AS v
+          FROM json_to_recordset(${failedJson}::json) AS v(id uuid, error_message text)
           WHERE r.id = v.id
         `);
 
-        syncedIds.push(...failedIds);
+        syncedIds.push(...failedRecipients.map((r) => r.id));
       }
 
       return syncedIds;
