@@ -6,7 +6,7 @@ import { NatsWebhookWorker } from "../../nats/webhook-worker.js";
 import { db } from "../../db.js";
 import { batches, recipients, sendConfigs } from "@batchsender/db";
 import { eq } from "drizzle-orm";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 
 describe("Webhook Queue Processing Flow", () => {
   let natsClient: NatsClient;
@@ -26,11 +26,11 @@ describe("Webhook Queue Processing Flow", () => {
     queueProcessor = new WebhookQueueProcessor(natsClient);
     webhookWorker = new NatsWebhookWorker(natsClient);
 
-    // Create test data
-    testUserId = `test-user-${uuidv4()}`;
-    testBatchId = `test-batch-${uuidv4()}`;
-    testRecipientId = `test-recipient-${uuidv4()}`;
-    testProviderMessageId = `test-msg-${uuidv4()}`;
+    // Create test data - use proper UUIDs for PostgreSQL
+    testUserId = randomUUID();
+    testBatchId = randomUUID();
+    testRecipientId = randomUUID();
+    testProviderMessageId = randomUUID();
 
     // Insert test batch
     await db.insert(batches).values({
@@ -221,7 +221,7 @@ describe("Webhook Queue Processing Flow", () => {
     // Create multiple recipients
     const recipientIds = [];
     for (let i = 0; i < 10; i++) {
-      const recipientId = `test-recipient-batch-${i}-${uuidv4()}`;
+      const recipientId = `test-recipient-batch-${i}-${randomUUID()}`;
       recipientIds.push(recipientId);
 
       await db.insert(recipients).values({
@@ -230,7 +230,7 @@ describe("Webhook Queue Processing Flow", () => {
         identifier: `test${i}@example.com`,
         email: `test${i}@example.com`,
         status: "sent",
-        providerMessageId: `msg-${i}-${uuidv4()}`,
+        providerMessageId: `msg-${i}-${randomUUID()}`,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -248,7 +248,7 @@ describe("Webhook Queue Processing Flow", () => {
         type: "email.delivered",
         created_at: new Date().toISOString(),
         data: {
-          email_id: `msg-${i}-${uuidv4()}`,
+          email_id: `msg-${i}-${randomUUID()}`,
           from: "test@batchsender.com",
           to: [`test${i}@example.com`],
           subject: "Test Email",
@@ -331,7 +331,7 @@ describe("Webhook Queue Processing Flow", () => {
     const telnyxWebhook = {
       data: {
         event_type: "message.finalized",
-        id: uuidv4(),
+        id: randomUUID(),
         occurred_at: new Date().toISOString(),
         payload: {
           id: testProviderMessageId,
