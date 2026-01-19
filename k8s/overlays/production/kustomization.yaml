@@ -12,7 +12,7 @@ images:
   newTag: main-e2426ec
 - name: registry.localhost:5000/web
   newName: ghcr.io/ejkkan/offsenda-web
-  newTag: main-1e79ce2
+  newTag: main-e2426ec
 - name: registry.localhost:5000/migration
   newName: ghcr.io/ejkkan/offsenda-migration
   newTag: main-e2426ec
