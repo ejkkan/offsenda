@@ -93,7 +93,7 @@ export class NatsWebhookWorkerRefactored {
       // Consumer doesn't exist, create it
       await jsm.consumers.add("webhooks", {
         name: "webhook-processor",
-        filter_subject: "webhook.*.*",
+        filter_subject: "webhook.>",
         deliver_policy: "all",
         ack_policy: "explicit",
         max_deliver: 3,

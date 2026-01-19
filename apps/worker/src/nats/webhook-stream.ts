@@ -14,7 +14,7 @@ export async function setupWebhookStream(jsm: JetStreamManager): Promise<void> {
       // Create webhook stream
       await jsm.streams.add({
         name: "webhooks",
-        subjects: ["webhook.*.*"], // webhook.<provider>.<event_type>
+        subjects: ["webhook.>"], // webhook.<provider>.<event_type> (supports nested types like sms.delivered)
         retention: "workqueue", // Delete after acknowledgment
         storage: "file",
         replicas: 1,
@@ -28,26 +28,8 @@ export async function setupWebhookStream(jsm: JetStreamManager): Promise<void> {
       log.nats.info("webhooks stream created");
     }
 
-    // Create consumer for webhook processor
-    const consumerInfo = {
-      durable_name: "webhook-processor",
-      deliver_subject: "webhook.process",
-      ack_policy: "explicit",
-      ack_wait: 30 * 1e9, // 30 seconds
-      max_deliver: 3, // Retry failed messages 3 times
-      replay_policy: "instant",
-      deliver_policy: "all",
-      max_ack_pending: 1000, // Process up to 1000 webhooks in parallel
-      rate_limit: 10000, // Max 10k webhooks per second
-    };
-
-    try {
-      await jsm.consumers.info("webhooks", consumerInfo.durable_name);
-      log.nats.info("webhook consumer already exists");
-    } catch {
-      await jsm.consumers.add("webhooks", consumerInfo);
-      log.nats.info("webhook consumer created");
-    }
+    // Note: Consumer is created by NatsWebhookWorker when it starts
+    // This avoids conflicts between push/pull consumer configurations
 
   } catch (error) {
     log.nats.error({ error }, "failed to setup webhook stream");

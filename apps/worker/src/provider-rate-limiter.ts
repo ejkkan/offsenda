@@ -302,6 +302,24 @@ export class ProviderRateLimiter {
   }
 
   /**
+   * Get information about this rate limiter
+   * Useful for debugging and monitoring
+   */
+  getLimitType(): {
+    provider: string;
+    tokensPerSecond: number;
+    burstCapacity: number;
+    keyPrefix: string;
+  } {
+    return {
+      provider: this.provider,
+      tokensPerSecond: this.tokensPerSecond,
+      burstCapacity: this.burstCapacity,
+      keyPrefix: this.keyPrefix,
+    };
+  }
+
+  /**
    * Close Redis connection
    */
   async close(): Promise<void> {

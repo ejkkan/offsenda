@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { config } from "./config.js";
 import { registerWebhookRoutes } from "./webhooks/routes.js";
 import { registerWebhookSimulator } from "./webhooks.js";
+import { registerWebhookSimulatorRoutes } from "./test/webhook-simulator-routes.js";
 import { WebhookQueueProcessor } from "./webhooks/queue-processor.js";
 import { registerApi } from "./api.js";
 import { registerTestSetupApi } from "./api-test-setup.js";
@@ -208,6 +209,7 @@ try {
   await registerApi(app);
   await registerTestSetupApi(app);
   await registerWebhookSimulator(app);
+  await registerWebhookSimulatorRoutes(app, natsClient);
 
   // Health check endpoint for k8s probes
   app.get("/health", async () => {

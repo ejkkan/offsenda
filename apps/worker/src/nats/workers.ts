@@ -12,7 +12,7 @@ import { getModule } from "../modules/index.js";
 import type { JobPayload, JobResult } from "../modules/types.js";
 import { buildJobPayload } from "../domain/payload-builders/index.js";
 import { log, createTimer, withTraceAsync } from "../logger.js";
-import { ProviderRateLimiter } from "../provider-rate-limiter.js";
+import { acquireRateLimit, closeRateLimitRegistry } from "../rate-limiting/index.js";
 import {
   emailsSentTotal,
   emailErrorsTotal,
@@ -21,25 +21,6 @@ import {
   clickhouseEventsTotal,
 } from "../metrics.js";
 import { calculateNatsBackoff, calculateBatchBackoff, calculateEmailBackoff } from "../domain/utils/backoff.js";
-
-// Provider rate limiters keyed by config ID
-const rateLimiters = new Map<string, ProviderRateLimiter>();
-
-function getRateLimiter(configId: string, tokensPerSecond: number): ProviderRateLimiter | null {
-  if (config.DISABLE_RATE_LIMIT) {
-    return null;
-  }
-
-  let limiter = rateLimiters.get(configId);
-  if (!limiter) {
-    limiter = new ProviderRateLimiter({
-      provider: configId,
-      tokensPerSecond,
-    });
-    rateLimiters.set(configId, limiter);
-  }
-  return limiter;
-}
 
 function getDefaultEmailConfig(): EmbeddedSendConfig {
   return {
@@ -375,14 +356,10 @@ export class NatsEmailWorker {
         webhookData,
       });
 
-      // Rate limiting
-      const rateLimit = sendConfig.rateLimit?.perSecond || 100;
-      const rateLimiter = getRateLimiter(sendConfig.id, rateLimit);
-      if (rateLimiter) {
-        const acquired = await rateLimiter.acquire(10000);
-        if (!acquired) {
-          throw new Error(`Rate limit timeout - could not process within 10 seconds`);
-        }
+      // Rate limiting (handles managed vs BYOK flows)
+      const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000);
+      if (!rateLimitResult.allowed) {
+        throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
       }
 
       const sendTimer = emailSendDuration.startTimer({ provider: sendConfig.module, status: "success" });
@@ -570,11 +547,8 @@ export class NatsEmailWorker {
       }
     }
 
-    // Close rate limiters
-    for (const limiter of rateLimiters.values()) {
-      await limiter.close();
-    }
-    rateLimiters.clear();
+    // Close rate limit registry
+    await closeRateLimitRegistry();
     this.activeConsumers.clear();
     this.consumerCreationLocks.clear();
 

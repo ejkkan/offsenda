@@ -1,7 +1,7 @@
 import { db } from "../db.js";
 import { recipients, batches } from "@batchsender/db";
 import { eq, and, or, sql } from "drizzle-orm";
-import { log } from "../logger.js";
+import { log, createTimer } from "../logger.js";
 import { getCacheService } from "./cache-service.js";
 import { lookupByProviderMessageId } from "../clickhouse.js";
 
@@ -227,7 +227,7 @@ export class WebhookMatcher {
    * Try all strategies to match a webhook to a recipient
    */
   async matchWebhook(event: any): Promise<WebhookMatchResult | null> {
-    const timer = log.startTimer();
+    const timer = createTimer();
 
     for (const strategy of this.strategies) {
       try {

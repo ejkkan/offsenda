@@ -90,7 +90,8 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
       request.url.startsWith("/webhooks") ||
       request.url.startsWith("/api/test-webhook") ||
       request.url.startsWith("/api/test-reports") ||
-      request.url.startsWith("/api/test-setup")
+      request.url.startsWith("/api/test-setup") ||
+      request.url.startsWith("/test/")
     ) {
       return;
     }

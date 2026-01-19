@@ -108,7 +108,7 @@ export class WebhookQueueProcessor {
       // Consumer doesn't exist, create it
       await jsm.consumers.add("webhooks", {
         name: "webhook-queue-processor",
-        filter_subject: "webhook.*.*",
+        filter_subject: "webhook.>",
         deliver_policy: DeliverPolicy.All,
         ack_policy: AckPolicy.Explicit,
         max_deliver: 3,

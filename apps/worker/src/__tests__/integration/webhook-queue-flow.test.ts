@@ -4,7 +4,7 @@ import { NatsQueueService } from "../../nats/queue-service.js";
 import { WebhookQueueProcessor, WebhookEventFactory } from "../../webhooks/queue-processor.js";
 import { NatsWebhookWorker } from "../../nats/webhook-worker.js";
 import { db } from "../../db.js";
-import { batches, recipients, sendConfigs } from "@batchsender/db";
+import { batches, recipients, sendConfigs, users } from "@batchsender/db";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
@@ -31,6 +31,15 @@ describe("Webhook Queue Processing Flow", () => {
     testBatchId = randomUUID();
     testRecipientId = randomUUID();
     testProviderMessageId = randomUUID();
+
+    // Insert test user first (foreign key requirement)
+    await db.insert(users).values({
+      id: testUserId,
+      email: `test-${testUserId}@example.com`,
+      passwordHash: "test-hash-not-real",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
 
     // Insert test batch
     await db.insert(batches).values({
@@ -61,9 +70,10 @@ describe("Webhook Queue Processing Flow", () => {
   });
 
   afterAll(async () => {
-    // Cleanup test data
+    // Cleanup test data (in correct order due to foreign keys)
     await db.delete(recipients).where(eq(recipients.id, testRecipientId));
     await db.delete(batches).where(eq(batches.id, testBatchId));
+    await db.delete(users).where(eq(users.id, testUserId));
 
     // Close connections
     await webhookWorker.shutdown();
@@ -177,12 +187,21 @@ describe("Webhook Queue Processing Flow", () => {
   });
 
   it("should handle duplicate webhooks with deduplication", async () => {
+    // Use unique message ID to avoid NATS stream-level deduplication from previous tests
+    const uniqueMessageId = randomUUID();
+
+    // Update recipient with unique message ID for this test
+    await db
+      .update(recipients)
+      .set({ providerMessageId: uniqueMessageId })
+      .where(eq(recipients.id, testRecipientId));
+
     // Create delivery webhook event
     const webhookEvent = WebhookEventFactory.fromResend({
       type: "email.delivered",
       created_at: new Date().toISOString(),
       data: {
-        email_id: testProviderMessageId,
+        email_id: uniqueMessageId,
         from: "test@batchsender.com",
         to: ["test@example.com"],
         subject: "Test Email",
@@ -218,10 +237,16 @@ describe("Webhook Queue Processing Flow", () => {
   });
 
   it("should process webhooks in batches", async () => {
+    // Get initial delivered count (may be non-zero from stale NATS messages)
+    const initialBatch = await db.query.batches.findFirst({
+      where: eq(batches.id, testBatchId),
+    });
+    const initialDeliveredCount = initialBatch?.deliveredCount || 0;
+
     // Create multiple recipients
     const recipientIds = [];
     for (let i = 0; i < 10; i++) {
-      const recipientId = `test-recipient-batch-${i}-${randomUUID()}`;
+      const recipientId = randomUUID();
       recipientIds.push(recipientId);
 
       await db.insert(recipients).values({
@@ -271,12 +296,12 @@ describe("Webhook Queue Processing Flow", () => {
     // Stop worker
     await webhookWorker.shutdown();
 
-    // Verify batch counter
+    // Verify batch counter (check delta, not absolute value, to handle stale NATS messages)
     const batch = await db.query.batches.findFirst({
       where: eq(batches.id, testBatchId),
     });
 
-    expect(batch?.deliveredCount).toBe(10);
+    expect((batch?.deliveredCount || 0) - initialDeliveredCount).toBe(10);
 
     // Cleanup
     for (const recipientId of recipientIds) {

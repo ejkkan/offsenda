@@ -163,7 +163,7 @@ export class NatsClient {
       try {
         await this.jsm!.streams.add({
           name: "webhooks",
-          subjects: ["webhook.*.*"], // webhook.<provider>.<event_type>
+          subjects: ["webhook.>"], // webhook.<provider>.<event_type> (supports nested types like sms.delivered)
           retention: RetentionPolicy.Workqueue,
           storage: StorageType.File,
           num_replicas: config.NATS_REPLICAS,

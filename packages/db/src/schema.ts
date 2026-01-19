@@ -243,6 +243,7 @@ export type WebhookModuleConfig = {
 };
 
 export type SmsModuleConfig = {
+  mode?: "managed" | "byok"; // Optional for backwards compatibility (defaults to byok if credentials provided)
   provider: "twilio" | "aws-sns" | "mock" | "telnyx";
   accountSid?: string;
   authToken?: string;

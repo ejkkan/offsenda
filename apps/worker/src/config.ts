@@ -66,10 +66,26 @@ const envSchema = z.object({
   CONCURRENT_BATCHES: z.coerce.number().default(50), // Parallel batch processing (was 10)
   MAX_CONCURRENT_EMAILS: z.coerce.number().default(200), // Total concurrent email jobs (was 50)
 
-  // Provider-specific rate limits (messages per second)
+  // Provider-specific rate limits (messages per second) - LEGACY: use MANAGED_* for new code
   SES_RATE_LIMIT: z.coerce.number().default(14), // AWS SES default limit
   RESEND_RATE_LIMIT: z.coerce.number().default(100), // Resend default limit
   MOCK_RATE_LIMIT: z.coerce.number().default(5000), // Mock provider for stress testing (was 1000)
+
+  // =============================================================================
+  // Rate Limiting (Managed vs BYOK)
+  // =============================================================================
+  // System-wide rate limit (applies to all requests)
+  SYSTEM_RATE_LIMIT: z.coerce.number().default(10000),
+
+  // Managed provider rate limits (shared by ALL users using managed mode)
+  // These apply when users use BatchSender's provider accounts
+  MANAGED_SES_RATE_LIMIT: z.coerce.number().default(14), // AWS SES default limit
+  MANAGED_RESEND_RATE_LIMIT: z.coerce.number().default(100), // Resend rate limit
+  MANAGED_TELNYX_RATE_LIMIT: z.coerce.number().default(50), // Telnyx SMS rate limit
+  MANAGED_MOCK_RATE_LIMIT: z.coerce.number().default(5000), // Mock provider for testing
+
+  // SMS provider for managed mode
+  SMS_PROVIDER: z.enum(["telnyx", "mock"]).default("mock"),
 
   // Worker scaling
   WORKER_ID: z.string().default("worker-1"), // Unique ID for this worker instance

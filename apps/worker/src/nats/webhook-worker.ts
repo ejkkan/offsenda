@@ -37,6 +37,7 @@ export class NatsWebhookWorker {
   private isProcessing = false;
   private isShuttingDown = false;
   private consumerPromise: Promise<void> | null = null;
+  private consumerMessages: { stop(): void } | null = null;
 
   // Configuration
   private readonly batchSize = config.WEBHOOK_BATCH_SIZE || 100;
@@ -48,18 +49,21 @@ export class NatsWebhookWorker {
    * Start processing webhook events from NATS
    */
   async startWebhookProcessor(): Promise<void> {
+    // Reset shutdown state to allow restart
+    this.isShuttingDown = false;
+
     const js = this.natsClient.getJetStream();
 
     try {
       // Create consumer if it doesn't exist
       const jsm = this.natsClient.getJetStreamManager();
       try {
-        await jsm.consumers.info("email-system", "webhook-processor");
+        await jsm.consumers.info("webhooks", "webhook-processor");
       } catch (error) {
         // Consumer doesn't exist, create it
-        await jsm.consumers.add("email-system", {
+        await jsm.consumers.add("webhooks", {
           name: "webhook-processor",
-          filter_subject: "webhook.*.*",
+          filter_subject: "webhook.>",
           deliver_policy: "all",
           ack_policy: "explicit",
           max_deliver: 3,
@@ -69,10 +73,13 @@ export class NatsWebhookWorker {
         log.system.info("Created webhook-processor consumer");
       }
 
-      const consumer = await js.consumers.get("email-system", "webhook-processor");
+      const consumer = await js.consumers.get("webhooks", "webhook-processor");
       const messages = await consumer.consume({
         max_messages: 1000 // Process up to 1000 messages concurrently
       });
+
+      // Store reference for shutdown
+      this.consumerMessages = messages;
 
       log.system.info("Webhook processor started");
 
@@ -536,15 +543,22 @@ export class NatsWebhookWorker {
       this.flushTimer = null;
     }
 
+    // Stop the consumer to break out of the for-await loop
+    if (this.consumerMessages) {
+      this.consumerMessages.stop();
+      this.consumerMessages = null;
+    }
+
     // Process remaining events
     if (this.eventBuffer.length > 0) {
       log.system.info({ bufferSize: this.eventBuffer.length }, "Processing remaining webhook events");
       await this.processBatch();
     }
 
-    // Wait for consumer to stop
+    // Wait for consumer to finish
     if (this.consumerPromise) {
       await this.consumerPromise;
+      this.consumerPromise = null;
     }
 
     log.system.info("Webhook worker shutdown complete");

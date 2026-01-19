@@ -1,5 +1,6 @@
 import type { Module, JobPayload, JobResult, ValidationResult, SendConfig } from "./types.js";
 import type { SmsModuleConfig } from "@batchsender/db";
+import { config } from "../config.js";
 import { log } from "../logger.js";
 
 /**
@@ -11,10 +12,11 @@ interface SmsPayload extends JobPayload {
 }
 
 /**
- * SMS Module - Sends SMS messages via Twilio, AWS SNS, or mock provider
+ * SMS Module - Sends SMS messages via Telnyx, Twilio, AWS SNS, or mock provider
  *
- * Currently implements mock provider only.
- * Real providers can be added when needed.
+ * Supports two modes:
+ * - managed: Uses BatchSender's infrastructure (Telnyx from env vars)
+ * - byok: Uses user's own API credentials (Bring Your Own Key)
  */
 export class SmsModule implements Module {
   readonly type = "sms";
@@ -24,19 +26,30 @@ export class SmsModule implements Module {
     const errors: string[] = [];
     const cfg = rawConfig as SmsModuleConfig;
 
-    // Provider validation
+    // Mode validation (optional for backwards compatibility)
+    if (cfg.mode && cfg.mode !== "managed" && cfg.mode !== "byok") {
+      errors.push('mode must be "managed" or "byok"');
+    }
+
+    // Managed mode - minimal validation, provider from env
+    if (cfg.mode === "managed") {
+      // fromNumber can be optional in managed mode (use env default)
+      return { valid: errors.length === 0, errors };
+    }
+
+    // BYOK mode validation
     if (!cfg.provider) {
       errors.push("provider is required (twilio, aws-sns, telnyx, or mock)");
     } else if (!["twilio", "aws-sns", "mock", "telnyx"].includes(cfg.provider)) {
       errors.push('provider must be "twilio", "aws-sns", "telnyx", or "mock"');
     }
 
-    // fromNumber required for all providers
+    // fromNumber required for BYOK
     if (!cfg.fromNumber) {
       errors.push("fromNumber is required");
     }
 
-    // Provider-specific validation
+    // Provider-specific validation for BYOK
     if (cfg.provider === "twilio") {
       if (!cfg.accountSid) errors.push("accountSid is required for Twilio");
       if (!cfg.authToken) errors.push("authToken is required for Twilio");
@@ -48,7 +61,6 @@ export class SmsModule implements Module {
 
     if (cfg.provider === "telnyx") {
       if (!cfg.apiKey) errors.push("apiKey is required for Telnyx");
-      // messagingProfileId is optional
     }
 
     return { valid: errors.length === 0, errors };
@@ -79,25 +91,10 @@ export class SmsModule implements Module {
     try {
       let messageId: string;
 
-      switch (cfg.provider) {
-        case "mock":
-          messageId = await this.sendMock(smsPayload);
-          break;
-        case "twilio":
-          // Real Twilio integration can be added here
-          messageId = await this.sendMock(smsPayload);
-          log.system.warn({ provider: "twilio" }, "Twilio not implemented, using mock");
-          break;
-        case "aws-sns":
-          // Real AWS SNS integration can be added here
-          messageId = await this.sendMock(smsPayload);
-          log.system.warn({ provider: "aws-sns" }, "AWS SNS not implemented, using mock");
-          break;
-        case "telnyx":
-          messageId = await this.sendTelnyx(smsPayload, cfg);
-          break;
-        default:
-          throw new Error(`Unknown SMS provider: ${cfg.provider}`);
+      if (cfg.mode === "managed") {
+        messageId = await this.sendManaged(smsPayload, cfg);
+      } else {
+        messageId = await this.sendBYOK(smsPayload, cfg);
       }
 
       return {
@@ -112,6 +109,51 @@ export class SmsModule implements Module {
         error: error instanceof Error ? error.message : "Unknown error",
         latencyMs: Date.now() - start,
       };
+    }
+  }
+
+  /**
+   * Send using BatchSender's managed infrastructure
+   */
+  private async sendManaged(payload: SmsPayload, cfg: SmsModuleConfig): Promise<string> {
+    const provider = config.SMS_PROVIDER;
+
+    if (provider === "mock") {
+      return this.sendMock(payload);
+    }
+
+    if (provider === "telnyx") {
+      // Use managed Telnyx credentials from environment
+      const managedConfig: SmsModuleConfig = {
+        mode: "managed",
+        provider: "telnyx",
+        apiKey: process.env.TELNYX_API_KEY,
+        fromNumber: cfg.fromNumber || process.env.TELNYX_FROM_NUMBER,
+        messagingProfileId: process.env.TELNYX_MESSAGING_PROFILE_ID,
+      };
+      return this.sendTelnyx(payload, managedConfig);
+    }
+
+    throw new Error(`Unknown managed SMS provider: ${provider}`);
+  }
+
+  /**
+   * Send using user's own credentials (BYOK)
+   */
+  private async sendBYOK(payload: SmsPayload, cfg: SmsModuleConfig): Promise<string> {
+    switch (cfg.provider) {
+      case "mock":
+        return this.sendMock(payload);
+      case "twilio":
+        log.system.warn({ provider: "twilio" }, "Twilio not implemented, using mock");
+        return this.sendMock(payload);
+      case "aws-sns":
+        log.system.warn({ provider: "aws-sns" }, "AWS SNS not implemented, using mock");
+        return this.sendMock(payload);
+      case "telnyx":
+        return this.sendTelnyx(payload, cfg);
+      default:
+        throw new Error(`Unknown SMS provider: ${cfg.provider}`);
     }
   }
 

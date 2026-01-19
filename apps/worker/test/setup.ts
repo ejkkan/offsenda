@@ -162,6 +162,7 @@ async function startWorker(): Promise<void> {
       CLICKHOUSE_USER: "test",
       CLICKHOUSE_PASSWORD: "test",
       CLICKHOUSE_DATABASE: "batchsender_test",
+      CLICKHOUSE_FLUSH_INTERVAL_MS: "500", // Fast flush for tests (default is 5000ms)
       WEBHOOK_SECRET: "test-webhook-secret",
       DISABLE_RATE_LIMIT: "true", // Disable rate limiting for E2E tests
     },
