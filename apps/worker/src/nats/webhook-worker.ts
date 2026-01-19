@@ -55,12 +55,18 @@ export class NatsWebhookWorker {
     const js = this.natsClient.getJetStream();
 
     try {
-      // Create consumer if it doesn't exist
+      // Create or recreate consumer if needed
       const jsm = this.natsClient.getJetStreamManager();
       try {
-        await jsm.consumers.info("webhooks", "webhook-processor");
+        const consumerInfo = await jsm.consumers.info("webhooks", "webhook-processor");
+        // Check if it's a push consumer (has deliver_subject) - if so, delete and recreate
+        if (consumerInfo.config.deliver_subject) {
+          log.system.warn("Found push consumer, deleting to recreate as pull consumer");
+          await jsm.consumers.delete("webhooks", "webhook-processor");
+          throw new Error("recreate"); // Trigger recreation
+        }
       } catch (error) {
-        // Consumer doesn't exist, create it
+        // Consumer doesn't exist or needs recreation, create it as pull consumer
         await jsm.consumers.add("webhooks", {
           name: "webhook-processor",
           filter_subject: "webhook.>",
@@ -70,7 +76,7 @@ export class NatsWebhookWorker {
           ack_wait: 30_000, // 30 seconds to process
           max_ack_pending: 1000,
         });
-        log.system.info("Created webhook-processor consumer");
+        log.system.info("Created webhook-processor consumer (pull mode)");
       }
 
       const consumer = await js.consumers.get("webhooks", "webhook-processor");
