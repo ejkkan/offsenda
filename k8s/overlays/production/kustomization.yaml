@@ -9,7 +9,7 @@ images:
 - name: ghcr.io/ejkkan/offsenda-worker
   newTag: main-dc88d3a
 - name: ghcr.io/ejkkan/offsenda-web
-  newTag: main-3fd39b8
+  newTag: main-6a9023b
 - name: ghcr.io/ejkkan/offsenda-migration
   newTag: main-dc88d3a
 
