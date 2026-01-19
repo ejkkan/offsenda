@@ -1,6 +1,8 @@
 import Fastify from "fastify";
 import { config } from "./config.js";
-import { registerWebhooks, registerWebhookSimulator } from "./webhooks.js";
+import { registerWebhookRoutes } from "./webhooks/routes.js";
+import { registerWebhookSimulator } from "./webhooks.js";
+import { WebhookQueueProcessor } from "./webhooks/queue-processor.js";
 import { registerApi } from "./api.js";
 import { registerTestSetupApi } from "./api-test-setup.js";
 import { clickhouse } from "./clickhouse.js";
@@ -14,6 +16,8 @@ import { RateLimiterService } from "./rate-limiter.js";
 import { NatsClient } from "./nats/client.js";
 import { NatsQueueService } from "./nats/queue-service.js";
 import { NatsEmailWorker } from "./nats/workers.js";
+import { NatsWebhookWorker } from "./nats/webhook-worker.js";
+import { setupWebhookStream } from "./nats/webhook-stream.js";
 
 // Services
 import { SchedulerService } from "./services/scheduler.js";
@@ -27,6 +31,7 @@ import { getHotStateManager } from "./hot-state-manager.js";
 
 const app = Fastify({
   logger: false,  // We use our own structured logger
+  bodyLimit: config.MAX_REQUEST_SIZE_BYTES, // Default is 1MB, we need up to 10MB for batch uploads
 });
 
 // Global error handler - prevent stack trace leakage in production
@@ -123,17 +128,15 @@ app.addContentTypeParser(
 export let natsClient: NatsClient;
 export let queueService: NatsQueueService;
 export let rateLimiterService: RateLimiterService;
+export let webhookQueueProcessor: WebhookQueueProcessor;
 let worker: NatsEmailWorker;
+let webhookWorker: NatsWebhookWorker;
 let scheduler: SchedulerService;
 let batchRecovery: BatchRecoveryService;
 let auditService: AuditService;
 let postgresSyncService: PostgresSyncService;
 
-// Register routes
-await registerWebhooks(app);
-await registerApi(app);
-await registerTestSetupApi(app);
-await registerWebhookSimulator(app);
+// Register routes - webhooks registered after NATS initialization
 
 // Sync queued batches from DB to NATS queue
 async function syncQueuedBatchesToQueue(): Promise<void> {
@@ -195,8 +198,16 @@ try {
 
   queueService = new NatsQueueService(natsClient);
   worker = new NatsEmailWorker(natsClient);
+  webhookWorker = new NatsWebhookWorker(natsClient);
+  webhookQueueProcessor = new WebhookQueueProcessor(natsClient);
 
   await testConnections();
+
+  // Register routes after NATS initialization
+  registerWebhookRoutes(app, webhookQueueProcessor);
+  await registerApi(app);
+  await registerTestSetupApi(app);
+  await registerWebhookSimulator(app);
 
   // Initialize rate limiter
   rateLimiterService = new RateLimiterService();
@@ -248,6 +259,21 @@ try {
 
   // Start existing user workers
   await worker.startExistingUserWorkers();
+
+  // Setup webhook stream
+  const jsm = natsClient.getJetStreamManager();
+  await setupWebhookStream(jsm);
+  log.system.info({}, "webhook stream configured");
+
+  // Start webhook processor
+  webhookWorker.startWebhookProcessor().catch((error) => {
+    const errorDetails = error instanceof Error
+      ? { message: error.message, name: error.name, stack: error.stack }
+      : { raw: String(error), type: typeof error };
+    log.system.error({ error: errorDetails }, "Webhook processor crashed");
+    process.exit(1);
+  });
+  log.system.info({}, "webhook processor started");
 
   // Start scheduler for scheduled batches
   scheduler = new SchedulerService(queueService);
@@ -355,6 +381,7 @@ async function shutdown() {
   // Phase 2: Drain in-flight work
   log.system.debug({}, "Phase 2: Drain workers");
   await withTimeout(worker.shutdown(), 10000, "NatsWorker");
+  await withTimeout(webhookWorker.shutdown(), 5000, "WebhookWorker");
 
   // Phase 3: Sync state to durable storage (while Dragonfly still available)
   log.system.debug({}, "Phase 3: Sync to durable storage");
