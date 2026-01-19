@@ -12,6 +12,7 @@ export const config = {
   apiKey: __ENV.K6_API_KEY || '',
   batchSize: parseInt(__ENV.K6_BATCH_SIZE || '100'),
   sendConfigId: __ENV.K6_SEND_CONFIG_ID || '',
+  dryRun: __ENV.K6_DRY_RUN === 'true',
 };
 
 /**

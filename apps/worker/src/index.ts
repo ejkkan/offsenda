@@ -35,31 +35,25 @@ const app = Fastify({
   bodyLimit: config.MAX_REQUEST_SIZE_BYTES, // Default is 1MB, we need up to 10MB for batch uploads
 });
 
-// Global error handler - prevent stack trace leakage in production
+// Global error handler - always return error message, hide stack in production
 app.setErrorHandler((error, request, reply) => {
-  // Log full error details internally
+  const statusCode = (error as any).statusCode || 500;
+
+  // Log full error details
   log.api.error({
     error: error.message,
     stack: error.stack,
     url: request.url,
     method: request.method,
     requestId: request.id,
+    statusCode,
   }, "unhandled error");
 
-  // In production, return sanitized error messages
-  if (config.NODE_ENV === "production") {
-    const statusCode = (error as any).statusCode || 500;
-    return reply.status(statusCode).send({
-      error: statusCode === 500 ? "Internal server error" : error.message,
-      requestId: request.id,
-    });
-  }
-
-  // In development, return full error details
-  return reply.status((error as any).statusCode || 500).send({
+  // Always return the error message - only hide stack trace in production
+  return reply.status(statusCode).send({
     error: error.message,
-    stack: error.stack,
     requestId: request.id,
+    ...(config.NODE_ENV !== "production" && { stack: error.stack }),
   });
 });
 

@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-01-19T20:31:37.639Z",
+  "scenario": "smoke",
+  "batchSize": 10000,
+  "metrics": {
+    "batches_completed": 0,
+    "batches_failed": 4,
+    "avg_completion_time_ms": 0,
+    "p95_completion_time_ms": 0,
+    "avg_throughput_per_sec": 0
+  }
+}

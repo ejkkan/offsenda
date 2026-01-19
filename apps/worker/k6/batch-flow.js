@@ -69,6 +69,7 @@ export default function () {
     textContent: 'Hello {{firstName}}!',
     recipients: recipients,
     ...(config.sendConfigId && { sendConfigId: config.sendConfigId }),
+    ...(config.dryRun && { dryRun: true }),
   });
 
   let createStart = Date.now();
