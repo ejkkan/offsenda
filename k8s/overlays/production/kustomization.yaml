@@ -7,11 +7,11 @@ resources:
 # Image tags - updated by CI pipeline
 images:
 - name: ghcr.io/ejkkan/offsenda-worker
-  newTag: main-5218f7f
+  newTag: main-dc88d3a
 - name: ghcr.io/ejkkan/offsenda-web
   newTag: main-3fd39b8
 - name: ghcr.io/ejkkan/offsenda-migration
-  newTag: main-5218f7f
+  newTag: main-dc88d3a
 
 # Production patches
   # Use production image from container registry
