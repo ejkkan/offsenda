@@ -28,13 +28,6 @@ images:
 patches:
 - patch: |-
     - op: replace
-      path: /spec/template/spec/containers/0/image
-      value: ghcr.io/ejkkan/offsenda-worker:latest
-  target:
-    kind: Deployment
-    name: worker
-- patch: |-
-    - op: replace
       path: /data/EMAIL_PROVIDER
       value: resend
     - op: replace

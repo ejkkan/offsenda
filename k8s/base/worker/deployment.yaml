@@ -23,6 +23,7 @@ spec:
       containers:
       - name: worker
         image: registry.localhost:5000/worker:dev
+        imagePullPolicy: Always
         ports:
         - containerPort: 6001
           name: http
