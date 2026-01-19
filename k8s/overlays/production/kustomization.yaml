@@ -9,13 +9,13 @@ resources:
 images:
 - name: registry.localhost:5000/worker
   newName: ghcr.io/ejkkan/offsenda-worker
-  newTag: main-6a9023b
+  newTag: main-1e79ce2
 - name: registry.localhost:5000/web
   newName: ghcr.io/ejkkan/offsenda-web
   newTag: main-6a9023b
 - name: registry.localhost:5000/migration
   newName: ghcr.io/ejkkan/offsenda-migration
-  newTag: main-6a9023b
+  newTag: main-1e79ce2
 
 # Production patches
   # Use production image from container registry
