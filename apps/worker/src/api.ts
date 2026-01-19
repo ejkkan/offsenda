@@ -435,7 +435,7 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
         })
       )
       .min(1)
-      .max(LIMITS.maxBatchSize),
+      .max(LIMITS.maxRecipientsPerRequest),
   });
 
   app.post("/api/batches", async (request, reply) => {
@@ -613,6 +613,126 @@ export async function registerApi(app: FastifyInstance): Promise<void> {
         return reply.status(500).send({ error: "Failed to create batch" });
       }
     }, traceId);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADD RECIPIENTS TO BATCH (chunked upload support)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const addRecipientsSchema = z.object({
+    recipients: z
+      .array(
+        z.object({
+          email: z.string().email(),
+          name: z.string().optional(),
+          variables: z.record(z.string()).optional(),
+          data: z.record(z.unknown()).optional(),
+        })
+      )
+      .min(1)
+      .max(LIMITS.maxRecipientsPerRequest),
+  });
+
+  app.post("/api/batches/:id/recipients", async (request, reply) => {
+    const userId = (request as any).userId;
+    const { id } = request.params as { id: string };
+
+    try {
+      const data = addRecipientsSchema.parse(request.body);
+
+      // Find the batch
+      const batch = await db.query.batches.findFirst({
+        where: and(eq(batches.id, id), eq(batches.userId, userId)),
+      });
+
+      if (!batch) {
+        return reply.status(404).send({ error: "Batch not found" });
+      }
+
+      // Only allow adding recipients to draft batches
+      if (batch.status !== "draft") {
+        return reply.status(400).send({
+          error: "Can only add recipients to draft batches",
+          currentStatus: batch.status,
+        });
+      }
+
+      // Check that total won't exceed max batch size
+      const newTotal = batch.totalRecipients + data.recipients.length;
+      if (newTotal > LIMITS.maxBatchSize) {
+        return reply.status(400).send({
+          error: `Adding ${data.recipients.length} recipients would exceed max batch size`,
+          currentCount: batch.totalRecipients,
+          requested: data.recipients.length,
+          maxBatchSize: LIMITS.maxBatchSize,
+        });
+      }
+
+      // Check total pending jobs limit
+      const [pendingCount] = await db
+        .select({ count: count() })
+        .from(recipients)
+        .innerJoin(batches, eq(recipients.batchId, batches.id))
+        .where(
+          and(
+            eq(batches.userId, userId),
+            inArray(recipients.status, ["pending", "queued"])
+          )
+        );
+
+      const currentPending = Number(pendingCount?.count || 0);
+      const pendingAfterAdd = currentPending + data.recipients.length;
+
+      if (pendingAfterAdd > LIMITS.maxPendingJobsPerUser) {
+        return reply.status(429).send({
+          error: "Too many pending jobs",
+          currentPending,
+          requested: data.recipients.length,
+          limit: LIMITS.maxPendingJobsPerUser,
+        });
+      }
+
+      // Insert recipients in chunks
+      const chunkSize = 1000;
+      for (let i = 0; i < data.recipients.length; i += chunkSize) {
+        const chunk = data.recipients.slice(i, i + chunkSize);
+        await db.insert(recipients).values(
+          chunk.map((r) => ({
+            batchId: batch.id,
+            email: r.email,
+            name: r.name || null,
+            variables: r.variables || null,
+            status: "pending" as const,
+          }))
+        );
+      }
+
+      // Update batch total
+      await db
+        .update(batches)
+        .set({
+          totalRecipients: newTotal,
+          updatedAt: new Date(),
+        })
+        .where(eq(batches.id, id));
+
+      log.api.info(
+        { batchId: id, added: data.recipients.length, total: newTotal },
+        "recipients added to batch"
+      );
+
+      return reply.send({
+        added: data.recipients.length,
+        totalRecipients: newTotal,
+        batchId: id,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ error: "Invalid input", details: error.errors });
+      }
+      log.api.error({ error: (error as Error).message, batchId: id }, "add recipients failed");
+      return reply.status(500).send({ error: "Failed to add recipients" });
+    }
   });
 
   // Get batch details

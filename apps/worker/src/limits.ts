@@ -13,6 +13,9 @@ export const LIMITS = {
   /** Max jobs/recipients in a single batch */
   maxBatchSize: 100_000,
 
+  /** Max recipients per request (for chunked uploads) */
+  maxRecipientsPerRequest: 10_000,
+
   /** Max total pending/processing jobs per user */
   maxPendingJobsPerUser: 1_000_000,
 
