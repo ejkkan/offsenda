@@ -47,6 +47,14 @@ const envSchema = z.object({
 
   // Webhooks
   WEBHOOK_SECRET: z.string().min(1),
+  TELNYX_WEBHOOK_SECRET: z.string().optional(),
+
+  // Webhook Queue Processing
+  WEBHOOK_BATCH_SIZE: z.coerce.number().default(100),
+  WEBHOOK_FLUSH_INTERVAL: z.coerce.number().default(1000), // ms
+  WEBHOOK_MAX_WORKERS: z.coerce.number().default(10),
+  WEBHOOK_QUEUE_ENABLED: stringBoolean.default(true),
+  WEBHOOK_DEDUP_TTL: z.coerce.number().default(86400), // 24 hours in seconds
 
   // Server
   PORT: z.coerce.number().default(6001),

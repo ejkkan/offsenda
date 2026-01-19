@@ -225,14 +225,51 @@ export const webhooksReceivedTotal = new promClient.Counter({
 });
 
 /**
+ * Counter: Total webhooks processed
+ * Labels: provider, event_type, status
+ */
+export const webhooksProcessedTotal = new promClient.Counter({
+  name: 'webhooks_processed_total',
+  help: 'Total number of webhooks processed',
+  labelNames: ['provider', 'event_type', 'status'],
+});
+
+/**
+ * Counter: Total webhook processing errors
+ * Labels: error_type
+ */
+export const webhooksErrorsTotal = new promClient.Counter({
+  name: 'webhooks_errors_total',
+  help: 'Total number of webhook processing errors',
+  labelNames: ['error_type'],
+});
+
+/**
+ * Histogram: Webhook batch size
+ */
+export const webhookBatchSize = new promClient.Histogram({
+  name: 'webhook_batch_size',
+  help: 'Size of webhook batches processed',
+  buckets: [1, 5, 10, 25, 50, 100, 200, 500],
+});
+
+/**
+ * Gauge: Current webhook queue depth
+ */
+export const webhookQueueDepth = new promClient.Gauge({
+  name: 'webhook_queue_depth',
+  help: 'Number of webhooks in processing buffer',
+});
+
+/**
  * Histogram: Webhook processing duration
- * Labels: provider, event_type
+ * Labels: status (success/error)
  */
 export const webhookProcessingDuration = new promClient.Histogram({
   name: 'webhook_processing_duration_seconds',
-  help: 'Duration of webhook processing',
-  labelNames: ['provider', 'event_type'],
-  buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1],
+  help: 'Duration of webhook batch processing',
+  labelNames: ['status'],
+  buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 5],
 });
 
 // ============================================

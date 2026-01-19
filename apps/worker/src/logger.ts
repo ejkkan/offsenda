@@ -148,6 +148,12 @@ export const log = {
 
   // System-level events
   system: logger.child({ component: "system" }),
+
+  // Cache operations (Dragonfly/Redis)
+  cache: logger.child({ component: "cache" }),
+
+  // NATS operations
+  nats: logger.child({ component: "nats" }),
 };
 
 // =============================================================================

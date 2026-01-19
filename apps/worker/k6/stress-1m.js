@@ -84,7 +84,9 @@ export default function (ctx) {
   const client = TestClient.fromContext(ctx);
 
   // Each VU takes one batch at a time
-  const batchIndex = __VU * options.scenarios.stress.iterations + __ITER;
+  // __VU is 1-indexed, __ITER is 0-indexed
+  const iterationsPerVU = Math.ceil(BATCH_COUNT / VUS);
+  const batchIndex = (__VU - 1) * iterationsPerVU + __ITER;
 
   if (batchIndex >= BATCH_COUNT) {
     console.log(`VU ${__VU}: No more batches to process`);

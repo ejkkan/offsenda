@@ -90,6 +90,7 @@ export class NatsClient {
 
         // Create stream if it doesn't exist
         await this.ensureStream();
+        await this.ensureWebhookStream();
 
         log.system.info("Successfully connected to NATS and initialized JetStream");
         return; // Success - exit retry loop
@@ -148,6 +149,43 @@ export class NatsClient {
     // Create default consumers
     await this.ensureConsumer("batch-processor", "sys.batch.>");
     await this.ensureConsumer("priority-processor", "email.priority.>");
+  }
+
+  private async ensureWebhookStream(): Promise<void> {
+    try {
+      // Check if stream exists
+      await this.jsm!.streams.info("webhooks");
+      log.system.info("Stream 'webhooks' already exists");
+    } catch (error) {
+      // Stream doesn't exist, create it
+      log.system.info("Creating stream 'webhooks'");
+
+      try {
+        await this.jsm!.streams.add({
+          name: "webhooks",
+          subjects: ["webhook.*.*"], // webhook.<provider>.<event_type>
+          retention: RetentionPolicy.Workqueue,
+          storage: StorageType.File,
+          num_replicas: config.NATS_REPLICAS,
+          max_age: 24 * 60 * 60 * 1e9, // 24 hours
+          max_bytes: 1024 * 1024 * 1024, // 1GB
+          discard: DiscardPolicy.Old,
+          max_msgs_per_subject: 10000,
+          duplicate_window: 60 * 1e9, // 60 seconds deduplication window
+          deny_delete: true, // Prevent accidental stream deletion
+          deny_purge: true, // Prevent accidental purge
+        });
+
+        log.system.info("Stream 'webhooks' created successfully");
+      } catch (createError: any) {
+        // Handle race condition: another worker may have created it
+        if (createError.message?.includes("stream name already in use")) {
+          log.system.info("Stream 'webhooks' was created by another worker");
+        } else {
+          throw createError;
+        }
+      }
+    }
   }
 
   private async ensureConsumer(name: string, filterSubject: string): Promise<void> {

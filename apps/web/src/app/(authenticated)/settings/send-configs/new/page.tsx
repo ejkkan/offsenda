@@ -7,7 +7,7 @@ import Link from "next/link";
 type ModuleType = "email" | "webhook" | "sms" | "push";
 type EmailMode = "managed" | "byok";
 type EmailProvider = "resend" | "ses";
-type SmsProvider = "twilio" | "aws-sns";
+type SmsProvider = "twilio" | "aws-sns" | "telnyx";
 type PushProvider = "fcm" | "apns";
 
 export default function NewSendConfigPage() {
@@ -39,6 +39,8 @@ export default function NewSendConfigPage() {
   const [smsProvider, setSmsProvider] = useState<SmsProvider>("twilio");
   const [smsAccountSid, setSmsAccountSid] = useState("");
   const [smsAuthToken, setSmsAuthToken] = useState("");
+  const [smsApiKey, setSmsApiKey] = useState("");
+  const [smsMessagingProfileId, setSmsMessagingProfileId] = useState("");
   const [smsFromNumber, setSmsFromNumber] = useState("");
 
   // Push config state
@@ -95,6 +97,10 @@ export default function NewSendConfigPage() {
           ...(smsProvider === "aws-sns" && {
             apiKey: smsAuthToken, // Reuse authToken field for API key
             region,
+          }),
+          ...(smsProvider === "telnyx" && {
+            apiKey: smsApiKey,
+            ...(smsMessagingProfileId && { messagingProfileId: smsMessagingProfileId }),
           }),
           ...(smsFromNumber && { fromNumber: smsFromNumber }),
         };
@@ -383,6 +389,17 @@ export default function NewSendConfigPage() {
                   />
                   <span className="text-sm">AWS SNS</span>
                 </label>
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    name="smsProvider"
+                    value="telnyx"
+                    checked={smsProvider === "telnyx"}
+                    onChange={() => setSmsProvider("telnyx")}
+                    className="mr-2"
+                  />
+                  <span className="text-sm">Telnyx</span>
+                </label>
               </div>
             </div>
 
@@ -450,6 +467,44 @@ export default function NewSendConfigPage() {
                     <option value="eu-west-1">Europe (Ireland)</option>
                     <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
                   </select>
+                </div>
+              </>
+            )}
+
+            {smsProvider === "telnyx" && (
+              <>
+                <div>
+                  <label htmlFor="smsApiKey" className="block text-sm font-medium mb-1">
+                    API Key
+                  </label>
+                  <input
+                    type="password"
+                    id="smsApiKey"
+                    value={smsApiKey}
+                    onChange={(e) => setSmsApiKey(e.target.value)}
+                    required
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    placeholder="KEY01234567890ABCDEF"
+                  />
+                  <p className="text-sm text-gray-500 mt-1">
+                    Find your API key in the Telnyx portal under API Keys
+                  </p>
+                </div>
+                <div>
+                  <label htmlFor="smsMessagingProfileId" className="block text-sm font-medium mb-1">
+                    Messaging Profile ID (optional)
+                  </label>
+                  <input
+                    type="text"
+                    id="smsMessagingProfileId"
+                    value={smsMessagingProfileId}
+                    onChange={(e) => setSmsMessagingProfileId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    placeholder="12345678-1234-1234-1234-123456789012"
+                  />
+                  <p className="text-sm text-gray-500 mt-1">
+                    Use messaging profiles for different use cases or sender settings
+                  </p>
                 </div>
               </>
             )}

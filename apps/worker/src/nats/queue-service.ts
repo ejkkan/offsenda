@@ -363,4 +363,50 @@ export class NatsQueueService {
       log.queue.error({ error }, "failed to cleanup idle consumers");
     }
   }
+
+  // Webhook operations
+  async enqueueWebhook(event: {
+    id: string;
+    provider: string;
+    eventType: string;
+    providerMessageId: string;
+    recipientId?: string;
+    batchId?: string;
+    userId?: string;
+    timestamp: string;
+    metadata?: Record<string, any>;
+    rawEvent?: any;
+  }): Promise<void> {
+    const timer = createTimer();
+
+    try {
+      const ack = await this.js.publish(
+        `webhook.${event.provider}.${event.eventType}`,
+        this.sc.encode(JSON.stringify(event)),
+        {
+          msgID: event.id, // Prevent duplicate processing
+          expect: {
+            streamName: "webhooks",
+          },
+        }
+      );
+
+      log.webhook.debug(
+        {
+          provider: event.provider,
+          eventType: event.eventType,
+          seq: ack.seq,
+          duplicate: ack.duplicate,
+          duration: timer(),
+        },
+        "webhook enqueued"
+      );
+    } catch (error) {
+      log.webhook.error(
+        { error, event },
+        "failed to enqueue webhook"
+      );
+      throw error;
+    }
+  }
 }

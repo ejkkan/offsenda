@@ -243,12 +243,13 @@ export type WebhookModuleConfig = {
 };
 
 export type SmsModuleConfig = {
-  provider: "twilio" | "aws-sns" | "mock";
+  provider: "twilio" | "aws-sns" | "mock" | "telnyx";
   accountSid?: string;
   authToken?: string;
   apiKey?: string;
   region?: string;
   fromNumber?: string;
+  messagingProfileId?: string; // Telnyx-specific: optional messaging profile
 };
 
 export type PushModuleConfig = {

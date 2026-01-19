@@ -1,0 +1,106 @@
+{
+  "description": "Example SMS send configurations for different providers",
+  "configs": [
+    {
+      "name": "Production Telnyx SMS",
+      "module": "sms",
+      "config": {
+        "provider": "telnyx",
+        "apiKey": "YOUR_TELNYX_API_KEY",
+        "fromNumber": "+15551234567",
+        "messagingProfileId": "optional-profile-id"
+      },
+      "rateLimit": {
+        "perSecond": 10
+      },
+      "isDefault": true
+    },
+    {
+      "name": "Twilio SMS",
+      "module": "sms",
+      "config": {
+        "provider": "twilio",
+        "accountSid": "YOUR_TWILIO_ACCOUNT_SID",
+        "authToken": "YOUR_TWILIO_AUTH_TOKEN",
+        "fromNumber": "+15551234567"
+      },
+      "rateLimit": {
+        "perSecond": 1
+      }
+    },
+    {
+      "name": "AWS SNS SMS",
+      "module": "sms",
+      "config": {
+        "provider": "aws-sns",
+        "apiKey": "AWS_ACCESS_KEY_ID:AWS_SECRET_ACCESS_KEY",
+        "region": "us-east-1",
+        "fromNumber": "+15551234567"
+      },
+      "rateLimit": {
+        "perSecond": 14
+      }
+    },
+    {
+      "name": "Development Mock SMS",
+      "module": "sms",
+      "config": {
+        "provider": "mock",
+        "fromNumber": "+15551234567"
+      },
+      "rateLimit": {
+        "perSecond": 100
+      }
+    }
+  ],
+  "batch_examples": [
+    {
+      "name": "Welcome SMS Campaign",
+      "payload": {
+        "message": "Welcome {{name}}! Your verification code is {{code}}. Reply STOP to unsubscribe."
+      }
+    },
+    {
+      "name": "Order Confirmation",
+      "payload": {
+        "message": "Hi {{name}}, your order #{{orderId}} has been confirmed and will arrive by {{deliveryDate}}."
+      }
+    }
+  ],
+  "recipient_examples": [
+    {
+      "identifier": "+15559876543",
+      "name": "John Doe",
+      "variables": {
+        "name": "John",
+        "code": "ABC123",
+        "orderId": "12345",
+        "deliveryDate": "Monday, Jan 22"
+      }
+    }
+  ],
+  "telnyx_features": {
+    "advantages": [
+      "10x higher throughput (10 MPS per number)",
+      "Direct carrier connections",
+      "Competitive pricing ($0.004/msg US)",
+      "230+ countries coverage",
+      "Free 24/7 support"
+    ],
+    "webhook_configuration": {
+      "environment_variables": [
+        "TELNYX_WEBHOOK_SECRET=your_webhook_signing_secret",
+        "WEBHOOK_BASE_URL=https://your-domain.com"
+      ],
+      "endpoints": {
+        "primary": "/api/webhooks/telnyx",
+        "failover": "/api/webhooks/telnyx-failover"
+      },
+      "events": [
+        "message.sent",
+        "message.finalized",
+        "message.delivery_report"
+      ]
+    }
+  }
+}

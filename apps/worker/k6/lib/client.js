@@ -127,7 +127,8 @@ export class TestClient {
     if (method === 'GET') {
       response = http.get(url, { headers, timeout: `${DEFAULT_TIMEOUT}s` });
     } else if (method === 'POST') {
-      response = http.post(url, body ? JSON.stringify(body) : null, { headers, timeout: `${DEFAULT_TIMEOUT}s` });
+      // Always send valid JSON body (empty object if null) to avoid Fastify parse errors
+      response = http.post(url, JSON.stringify(body || {}), { headers, timeout: `${DEFAULT_TIMEOUT}s` });
     } else if (method === 'DELETE') {
       response = http.del(url, null, { headers, timeout: `${DEFAULT_TIMEOUT}s` });
     } else if (method === 'PUT') {
@@ -220,13 +221,18 @@ export class TestClient {
   // ===========================================================================
 
   /**
-   * Create a batch
+   * Create a batch with automatic chunking for large recipient lists
    *
    * @param {object} options - Batch options
    * @returns {object} Created batch
    */
   createBatch(options = {}) {
-    const recipients = options.recipients || this.generateRecipients(options.recipientCount || 100);
+    const CHUNK_SIZE = 10000; // Max recipients per request
+    const allRecipients = options.recipients || this.generateRecipients(options.recipientCount || 100);
+
+    // First chunk goes with batch creation
+    const firstChunk = allRecipients.slice(0, CHUNK_SIZE);
+    const remainingRecipients = allRecipients.slice(CHUNK_SIZE);
 
     const payload = {
       name: options.name || `${this.testId}-batch-${Date.now()}`,
@@ -235,7 +241,7 @@ export class TestClient {
       fromName: options.fromName || 'k6 Test',
       htmlContent: options.htmlContent || '<h1>Test</h1><p>Hello {{firstName}}!</p>',
       textContent: options.textContent || 'Hello {{firstName}}!',
-      recipients,
+      recipients: firstChunk,
       ...(options.sendConfigId && { sendConfigId: options.sendConfigId }),
       ...(options.dryRun !== undefined && { dryRun: options.dryRun }),
     };
@@ -252,8 +258,37 @@ export class TestClient {
 
     const batch = this._parseResponse(response);
     this.createdResources.batches.push(batch.id);
-    console.log(`Created batch: ${batch.id} (${recipients.length} recipients)`);
-    return batch;
+    console.log(`Created batch: ${batch.id} (${firstChunk.length} recipients)`);
+
+    // Add remaining recipients in chunks
+    if (remainingRecipients.length > 0) {
+      let added = firstChunk.length;
+      for (let i = 0; i < remainingRecipients.length; i += CHUNK_SIZE) {
+        const chunk = remainingRecipients.slice(i, i + CHUNK_SIZE);
+        this.addRecipients(batch.id, chunk);
+        added += chunk.length;
+        console.log(`Added ${chunk.length} more recipients (${added}/${allRecipients.length})`);
+      }
+    }
+
+    return { ...batch, totalRecipients: allRecipients.length };
+  }
+
+  /**
+   * Add recipients to an existing batch (chunked upload)
+   *
+   * @param {string} batchId - Batch ID
+   * @param {array} recipients - Recipients to add (max 10k)
+   * @returns {object} Response with added count and total
+   */
+  addRecipients(batchId, recipients) {
+    const response = this._request('POST', `/api/batches/${batchId}/recipients`, { recipients });
+
+    if (!check(response, { 'add recipients: status 200': (r) => r.status === 200 })) {
+      throw new Error(`Failed to add recipients: ${response.status} ${response.body}`);
+    }
+
+    return this._parseResponse(response);
   }
 
   /**

@@ -99,6 +99,35 @@ describe("SMS Module Flow", () => {
       expect(result.valid).toBe(true);
     });
 
+    it("validates Telnyx SMS config correctly", () => {
+      const module = getModule("sms");
+
+      // Valid config with required fields
+      const validResult = module.validateConfig({
+        provider: "telnyx",
+        fromNumber: "+15551234567",
+        apiKey: "KEY01234567890ABCDEF",
+      });
+      expect(validResult.valid).toBe(true);
+
+      // Valid config with optional messaging profile
+      const validWithProfileResult = module.validateConfig({
+        provider: "telnyx",
+        fromNumber: "+15551234567",
+        apiKey: "KEY01234567890ABCDEF",
+        messagingProfileId: "12345678-1234-1234-1234-123456789012",
+      });
+      expect(validWithProfileResult.valid).toBe(true);
+
+      // Invalid config - missing API key
+      const invalidResult = module.validateConfig({
+        provider: "telnyx",
+        fromNumber: "+15551234567",
+      });
+      expect(invalidResult.valid).toBe(false);
+      expect(invalidResult.errors).toContain("apiKey is required for Telnyx");
+    });
+
     it("validates SMS payload correctly", () => {
       const module = getModule("sms");
       const result = module.validatePayload({
