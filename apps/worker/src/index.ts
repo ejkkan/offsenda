@@ -209,6 +209,11 @@ try {
   await registerTestSetupApi(app);
   await registerWebhookSimulator(app);
 
+  // Health check endpoint for k8s probes
+  app.get("/health", async () => {
+    return { status: "ok", timestamp: new Date().toISOString() };
+  });
+
   // Initialize rate limiter
   rateLimiterService = new RateLimiterService();
   log.system.info({}, "rate limiter initialized");
