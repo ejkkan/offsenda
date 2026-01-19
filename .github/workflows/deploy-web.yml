@@ -56,10 +56,8 @@ jobs:
       - name: Update image tag in kustomization
         run: |
           cd k8s/overlays/production
-          # Use sed to update the newTag for the web image
-          sed -i 's|name: ghcr.io/ejkkan/offsenda-web\n  newTag: .*|name: ghcr.io/ejkkan/offsenda-web\n  newTag: ${{ steps.tag.outputs.tag }}|' kustomization.yaml
-          # More reliable: use yq if available, or simple sed
-          sed -i '/name: ghcr.io\/ejkkan\/offsenda-web/{n;s/newTag: .*/newTag: ${{ steps.tag.outputs.tag }}/}' kustomization.yaml
+          # Update web image tag (match newName line, then update newTag on next line)
+          sed -i '/newName: ghcr.io\/ejkkan\/offsenda-web/{n;s/newTag: .*/newTag: ${{ steps.tag.outputs.tag }}/}' kustomization.yaml
           cat kustomization.yaml
 
       - name: Commit and push

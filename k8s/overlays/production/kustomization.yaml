@@ -5,12 +5,16 @@ resources:
 - ../../base
 
 # Image tags - updated by CI pipeline
+# name = base image to match, newName = production registry, newTag = commit hash
 images:
-- name: ghcr.io/ejkkan/offsenda-worker
+- name: registry.localhost:5000/worker
+  newName: ghcr.io/ejkkan/offsenda-worker
   newTag: main-6a9023b
-- name: ghcr.io/ejkkan/offsenda-web
+- name: registry.localhost:5000/web
+  newName: ghcr.io/ejkkan/offsenda-web
   newTag: main-6a9023b
-- name: ghcr.io/ejkkan/offsenda-migration
+- name: registry.localhost:5000/migration
+  newName: ghcr.io/ejkkan/offsenda-migration
   newTag: main-6a9023b
 
 # Production patches
