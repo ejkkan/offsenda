@@ -25,6 +25,7 @@ import { SchedulerService } from "./services/scheduler.js";
 import { BatchRecoveryService } from "./services/batch-recovery.js";
 import { AuditService, getAuditService } from "./services/audit.js";
 import { PostgresSyncService, getPostgresSyncService } from "./services/postgres-sync.js";
+import { LeaderElectionService, getLeaderElection } from "./services/leader-election.js";
 
 // High-throughput components
 import { getBufferedLogger } from "./buffered-logger.js";
@@ -128,6 +129,7 @@ let worker: NatsEmailWorker;
 let webhookWorker: NatsWebhookWorker;
 let scheduler: SchedulerService;
 let batchRecovery: BatchRecoveryService;
+let leaderElection: LeaderElectionService;
 let auditService: AuditService;
 let postgresSyncService: PostgresSyncService;
 
@@ -276,18 +278,23 @@ try {
   });
   log.system.info({}, "webhook processor started");
 
-  // Start scheduler for scheduled batches
-  scheduler = new SchedulerService(queueService);
-  scheduler.start();
-  log.system.info({}, "scheduler started");
+  // Start leader election (only one worker runs scheduler/recovery)
+  leaderElection = getLeaderElection();
+  await leaderElection.start();
+  log.system.info({ isLeader: leaderElection.isCurrentLeader() }, "leader election started");
 
-  // Start batch recovery service (detects and fixes stuck batches)
+  // Start scheduler for scheduled batches (only runs on leader)
+  scheduler = new SchedulerService(queueService, leaderElection);
+  scheduler.start();
+  log.system.info({}, "scheduler started (leader-only)");
+
+  // Start batch recovery service (detects and fixes stuck batches, leader-only)
   batchRecovery = new BatchRecoveryService({
     enabled: config.BATCH_RECOVERY_ENABLED,
     scanIntervalMs: config.BATCH_RECOVERY_INTERVAL_MS,
     stuckThresholdMs: config.BATCH_RECOVERY_THRESHOLD_MS,
     maxBatchesPerScan: config.BATCH_RECOVERY_MAX_PER_SCAN,
-  });
+  }, leaderElection);
   batchRecovery.start();
 
   // Start audit service (security logging to ClickHouse)
@@ -378,6 +385,7 @@ async function shutdown() {
   await withTimeout(app.close(), 2000, "Fastify"); // Stop HTTP server first
   scheduler.stop();
   batchRecovery.stop();
+  await withTimeout(leaderElection.stop(), 2000, "LeaderElection"); // Release leadership for other workers
 
   // Phase 2: Drain in-flight work
   log.system.debug({}, "Phase 2: Drain workers");

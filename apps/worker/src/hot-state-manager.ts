@@ -163,6 +163,7 @@ export class HotStateManager {
   private redis: Redis;
   private config: Required<Omit<HotStateConfig, "redis">>;
   private isShuttingDown = false;
+  private commandsInitialized = false;
 
   // Circuit breaker state using domain layer
   private circuitBreakerState: CircuitBreakerState;
@@ -196,28 +197,42 @@ export class HotStateManager {
     };
 
     if (hotStateConfig?.redis) {
+      // Test mode: use injected Redis
       this.redis = hotStateConfig.redis;
+      this.initializeCommands();
     } else {
-      const dragonflyUrl = config.DRAGONFLY_URL || "localhost:6379";
-      const [host, portStr] = dragonflyUrl.split(":");
+      // Production mode: simple Redis connection
+      // Dragonfly Operator handles HA behind the service
+      const [host, portStr] = config.DRAGONFLY_URL.split(":");
+      const port = parseInt(portStr || "6379");
 
       this.redis = new Redis({
-        host,
-        port: parseInt(portStr || "6379"),
+        host: host || "localhost",
+        port,
         maxRetriesPerRequest: 3,
-        enableReadyCheck: true,
-        lazyConnect: false,
-        keepAlive: 30000,
-        enableAutoPipelining: true,
         retryStrategy: (times) => Math.min(times * 50, 2000),
       });
 
       this.redis.on("error", (error) => {
-        log.system.error({ error }, "HotStateManager Redis connection error");
+        log.system.error({ error }, "Dragonfly connection error");
       });
+
+      this.redis.on("connect", () => {
+        log.system.debug({}, "Dragonfly connected");
+      });
+
+      this.initializeCommands();
+    }
+  }
+
+  /**
+   * Initialize Lua commands on the Redis client
+   */
+  private initializeCommands(): void {
+    if (this.commandsInitialized) {
+      return;
     }
 
-    // Define Lua scripts
     this.redis.defineCommand("incrementSent", {
       numberOfKeys: 3,
       lua: INCREMENT_SENT_SCRIPT,
@@ -232,6 +247,8 @@ export class HotStateManager {
       numberOfKeys: 1,
       lua: CHECK_RECIPIENT_STATUS_SCRIPT,
     });
+
+    this.commandsInitialized = true;
   }
 
   // Key helpers
@@ -606,10 +623,10 @@ export class HotStateManager {
    * Get all active batch IDs (for sync service)
    */
   async getActiveBatchIds(): Promise<string[]> {
+    const batchIds: Set<string> = new Set();
+
     try {
       let cursor = "0";
-      const batchIds: Set<string> = new Set();
-
       do {
         const [nextCursor, keys] = await this.redis.scan(cursor, "MATCH", "batch:*:pending_sync", "COUNT", 100);
         cursor = nextCursor;

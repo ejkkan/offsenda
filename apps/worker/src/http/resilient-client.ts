@@ -1,6 +1,7 @@
 import { log, createTimer } from "../logger.js";
 import { getSharedCircuitBreaker, SharedCircuitBreaker, CircuitState } from "./shared-circuit-breaker.js";
 import { calculateBackoff } from "../domain/utils/backoff.js";
+import { dragonflyCircuitBreakerFailuresTotal } from "../metrics.js";
 
 // =============================================================================
 // Resilient HTTP Client
@@ -228,7 +229,10 @@ export class ResilientHttpClient {
         if (response.ok || !this.shouldRetry(response.status, attempt)) {
           // Record success for circuit breaker (async, don't await to avoid latency)
           if (this.config.circuitBreaker.enabled) {
-            this.sharedCircuitBreaker.recordSuccess(host).catch(() => {});
+            this.sharedCircuitBreaker.recordSuccess(host).catch((err) => {
+              log.system.warn({ error: (err as Error).message, host }, "circuit breaker recordSuccess failed");
+              dragonflyCircuitBreakerFailuresTotal.inc({ operation: "record_success" });
+            });
           }
 
           return {
@@ -242,7 +246,10 @@ export class ResilientHttpClient {
 
         // Record failure for circuit breaker (async, don't await to avoid latency)
         if (this.config.circuitBreaker.enabled) {
-          this.sharedCircuitBreaker.recordFailure(host).catch(() => {});
+          this.sharedCircuitBreaker.recordFailure(host).catch((cbErr) => {
+            log.system.warn({ error: (cbErr as Error).message, host }, "circuit breaker recordFailure failed");
+            dragonflyCircuitBreakerFailuresTotal.inc({ operation: "record_failure" });
+          });
         }
 
         lastError = this.classifyError(response.status);
@@ -259,7 +266,10 @@ export class ResilientHttpClient {
         if (!shouldRetry || attempt >= this.config.retry.maxRetries) {
           // Record failure for circuit breaker (async, don't await to avoid latency)
           if (this.config.circuitBreaker.enabled) {
-            this.sharedCircuitBreaker.recordFailure(host).catch(() => {});
+            this.sharedCircuitBreaker.recordFailure(host).catch((cbErr) => {
+              log.system.warn({ error: (cbErr as Error).message, host }, "circuit breaker recordFailure failed");
+              dragonflyCircuitBreakerFailuresTotal.inc({ operation: "record_failure" });
+            });
           }
 
           return {
@@ -278,7 +288,10 @@ export class ResilientHttpClient {
 
         // Record failure for circuit breaker (async, don't await to avoid latency)
         if (this.config.circuitBreaker.enabled) {
-          this.sharedCircuitBreaker.recordFailure(host).catch(() => {});
+          this.sharedCircuitBreaker.recordFailure(host).catch((cbErr) => {
+            log.system.warn({ error: (cbErr as Error).message, host }, "circuit breaker recordFailure failed");
+            dragonflyCircuitBreakerFailuresTotal.inc({ operation: "record_failure" });
+          });
         }
       }
     }

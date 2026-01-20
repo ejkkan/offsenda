@@ -126,19 +126,30 @@ export class DualBuffer<T> implements Buffer<T> {
 }
 
 /**
+ * Options for AutoFlushBuffer
+ */
+export interface AutoFlushBufferOptions<T> {
+  /** Callback when flush fails - receives the error and items that were dropped */
+  onError?: (error: Error, droppedItems: T[]) => void;
+}
+
+/**
  * Buffer with automatic flush callback when full.
  */
 export class AutoFlushBuffer<T> implements Buffer<T> {
   private buffer: ResizableBuffer<T>;
   private flushCallback: (items: T[]) => Promise<void>;
   private flushInProgress = false;
+  private onError?: (error: Error, droppedItems: T[]) => void;
 
   constructor(
     maxSize: number,
-    onFlush: (items: T[]) => Promise<void>
+    onFlush: (items: T[]) => Promise<void>,
+    options?: AutoFlushBufferOptions<T>
   ) {
     this.buffer = new ResizableBuffer(maxSize);
     this.flushCallback = onFlush;
+    this.onError = options?.onError;
   }
 
   push(item: T): void {
@@ -156,8 +167,11 @@ export class AutoFlushBuffer<T> implements Buffer<T> {
       this.flushInProgress = true;
       const items = this.buffer.swap();
       this.flushCallback(items)
-        .catch(() => {
-          // On error, items are lost - caller should handle retry logic
+        .catch((error) => {
+          // Report dropped items to caller for logging/metrics
+          if (this.onError) {
+            this.onError(error instanceof Error ? error : new Error(String(error)), items);
+          }
         })
         .finally(() => {
           this.flushInProgress = false;

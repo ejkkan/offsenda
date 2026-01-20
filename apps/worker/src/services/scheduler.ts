@@ -3,6 +3,7 @@ import { batches } from "@batchsender/db";
 import { db } from "../db.js";
 import { NatsQueueService } from "../nats/queue-service.js";
 import { log } from "../logger.js";
+import { LeaderElectionService } from "./leader-election.js";
 
 /**
  * Scheduler Service
@@ -15,13 +16,22 @@ import { log } from "../logger.js";
  * - scheduledAt <= now
  *
  * Then updates status to 'queued' and publishes to NATS.
+ *
+ * IMPORTANT: Only runs on the leader worker to prevent duplicate processing
+ * across multiple worker instances.
  */
 export class SchedulerService {
   private intervalId?: ReturnType<typeof setInterval>;
   private isRunning = false;
   private readonly checkIntervalMs = 30_000; // 30 seconds
+  private leaderElection?: LeaderElectionService;
 
-  constructor(private queueService: NatsQueueService) {}
+  constructor(
+    private queueService: NatsQueueService,
+    leaderElection?: LeaderElectionService
+  ) {
+    this.leaderElection = leaderElection;
+  }
 
   /**
    * Start the scheduler
@@ -62,6 +72,11 @@ export class SchedulerService {
    * Check for scheduled batches and queue them
    */
   private async checkScheduledBatches(): Promise<void> {
+    // Only run if we're the leader (or no leader election configured)
+    if (this.leaderElection && !this.leaderElection.isCurrentLeader()) {
+      return;
+    }
+
     // Prevent concurrent runs
     if (this.isRunning) {
       return;

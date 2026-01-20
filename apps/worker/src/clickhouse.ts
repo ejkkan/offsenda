@@ -1,5 +1,7 @@
 import { createClient } from "@clickhouse/client";
 import { config } from "./config.js";
+import { log } from "./logger.js";
+import { clickhouseWriteFailuresTotal } from "./metrics.js";
 
 export const clickhouse = createClient({
   url: config.CLICKHOUSE_URL,
@@ -56,7 +58,12 @@ export async function logEmailEvent(event: EmailEvent): Promise<void> {
       format: "JSONEachRow",
     });
   } catch (error) {
-    console.error("Failed to log event to ClickHouse:", error);
+    log.system.error(
+      { error: (error as Error).message, eventType: event.event_type, batchId: event.batch_id },
+      "ClickHouse event logging failed"
+    );
+    clickhouseWriteFailuresTotal.inc({ operation: "insert" });
+    throw error;
   }
 }
 
@@ -83,7 +90,12 @@ export async function logEmailEvents(events: EmailEvent[]): Promise<void> {
       format: "JSONEachRow",
     });
   } catch (error) {
-    console.error("Failed to log events to ClickHouse:", error);
+    log.system.error(
+      { error: (error as Error).message, eventCount: events.length },
+      "ClickHouse bulk event logging failed"
+    );
+    clickhouseWriteFailuresTotal.inc({ operation: "insert" });
+    throw error;
   }
 }
 
@@ -107,7 +119,12 @@ export async function indexProviderMessage(params: {
       format: "JSONEachRow",
     });
   } catch (error) {
-    console.error("Failed to index message in ClickHouse:", error);
+    log.system.error(
+      { error: (error as Error).message, providerMessageId: params.provider_message_id },
+      "ClickHouse message index insert failed"
+    );
+    clickhouseWriteFailuresTotal.inc({ operation: "insert" });
+    throw error;
   }
 }
 
@@ -135,7 +152,11 @@ export async function lookupByProviderMessageId(
 
     return rows[0] || null;
   } catch (error) {
-    console.error("Failed to lookup message in ClickHouse:", error);
+    log.system.error(
+      { error: (error as Error).message, messageId },
+      "ClickHouse message lookup failed"
+    );
+    clickhouseWriteFailuresTotal.inc({ operation: "query" });
     return null;
   }
 }

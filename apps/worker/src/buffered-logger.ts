@@ -11,6 +11,7 @@
 import { clickhouse, type EmailEvent, type EventType, type ModuleType } from "./clickhouse.js";
 import { log } from "./logger.js";
 import { calculateBackoff } from "./domain/utils/backoff.js";
+import { bufferItemsDroppedTotal, clickhouseWriteFailuresTotal } from "./metrics.js";
 
 export interface BufferedLoggerConfig {
   /** Maximum events to buffer before forced flush (default: 10000) */
@@ -241,8 +242,9 @@ export class BufferedEventLogger {
             "BufferedEventLogger failed to flush events after all retries"
           );
 
-          // On final failure, we lose these events
-          // In production, consider writing to a fallback (file, different queue)
+          // Track dropped items in metrics
+          bufferItemsDroppedTotal.inc({ buffer_type: "clickhouse_events" }, events.length);
+          clickhouseWriteFailuresTotal.inc({ operation: "insert" });
         } else {
           log.system.warn(
             { error, attempt: attempt + 1, eventCount: events.length },
@@ -281,6 +283,10 @@ export class BufferedEventLogger {
             { error, indexCount: indexes.length, attempts: attempt + 1 },
             "BufferedEventLogger failed to flush message indexes after all retries"
           );
+
+          // Track dropped items in metrics
+          bufferItemsDroppedTotal.inc({ buffer_type: "clickhouse_indexes" }, indexes.length);
+          clickhouseWriteFailuresTotal.inc({ operation: "insert" });
         } else {
           log.system.warn(
             { error, attempt: attempt + 1, indexCount: indexes.length },

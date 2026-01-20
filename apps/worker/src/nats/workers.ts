@@ -1,5 +1,5 @@
 import { JsMsg, StringCodec } from "nats";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { batches, recipients } from "@batchsender/db";
 import type { EmailModuleConfig, BatchPayload } from "@batchsender/db";
 import { db } from "../db.js";
@@ -21,6 +21,7 @@ import {
   clickhouseEventsTotal,
 } from "../metrics.js";
 import { calculateNatsBackoff, calculateBatchBackoff, calculateEmailBackoff } from "../domain/utils/backoff.js";
+import { streamRecipientPages, countRecipients, type RecipientRow } from "../domain/utils/recipient-pagination.js";
 
 function getDefaultEmailConfig(): EmbeddedSendConfig {
   return {
@@ -76,31 +77,54 @@ export class NatsEmailWorker {
       const consumer = await js.consumers.get("email-system", consumerConfig.consumerName);
       const messages = await consumer.consume({ max_messages: consumerConfig.maxMessages });
 
-      log.system.info({ consumer: consumerConfig.consumerName }, "Consumer processor started");
+      log.system.info({ consumer: consumerConfig.consumerName, maxMessages: consumerConfig.maxMessages }, "Consumer processor started (parallel mode)");
+
+      // Track in-flight messages for graceful shutdown
+      const inFlight = new Set<Promise<void>>();
+
+      // Backpressure limit to prevent memory exhaustion
+      const maxInFlight = config.MAX_CONCURRENT_EMAILS || 1000;
 
       for await (const msg of messages) {
         if (this.isShuttingDown) break;
 
-        try {
-          await consumerConfig.onMessage(msg);
-          msg.ack();
-        } catch (error) {
+        // Backpressure: wait if we've hit the limit before accepting more
+        if (inFlight.size >= maxInFlight) {
+          await Promise.race(inFlight);
+        }
+
+        // Process message in parallel - don't await
+        const processingPromise = (async () => {
           try {
-            if (consumerConfig.onError) {
-              await consumerConfig.onError(msg, error as Error);
-            } else {
-              log.system.error({ error, seq: msg.seq, consumer: consumerConfig.consumerName }, "Message processing failed");
+            await consumerConfig.onMessage(msg);
+            msg.ack();
+          } catch (error) {
+            try {
+              if (consumerConfig.onError) {
+                await consumerConfig.onError(msg, error as Error);
+              } else {
+                log.system.error({ error, seq: msg.seq, consumer: consumerConfig.consumerName }, "Message processing failed");
+                msg.nak(calculateNatsBackoff(msg.info.redeliveryCount));
+              }
+            } catch (handlerError) {
+              // Error handler itself failed - log and NAK to prevent message loss
+              log.system.error(
+                { error: handlerError, originalError: error, seq: msg.seq, consumer: consumerConfig.consumerName },
+                "Error handler failed"
+              );
               msg.nak(calculateNatsBackoff(msg.info.redeliveryCount));
             }
-          } catch (handlerError) {
-            // Error handler itself failed - log and NAK to prevent message loss
-            log.system.error(
-              { error: handlerError, originalError: error, seq: msg.seq, consumer: consumerConfig.consumerName },
-              "Error handler failed"
-            );
-            msg.nak(calculateNatsBackoff(msg.info.redeliveryCount));
           }
-        }
+        })();
+
+        inFlight.add(processingPromise);
+        processingPromise.finally(() => inFlight.delete(processingPromise));
+      }
+
+      // Wait for all in-flight messages to complete before exiting
+      if (inFlight.size > 0) {
+        log.system.info({ consumer: consumerConfig.consumerName, inFlight: inFlight.size }, "Waiting for in-flight messages");
+        await Promise.allSettled(inFlight);
       }
     } catch (error) {
       const errorDetails = error instanceof Error
@@ -172,11 +196,11 @@ export class NatsEmailWorker {
           .where(eq(batches.id, batchId));
       }
 
-      const pendingRecipients = await db.query.recipients.findMany({
-        where: and(eq(recipients.batchId, batchId), eq(recipients.status, "pending")),
-      });
+      // Count pending recipients first for hot state initialization
+      // Uses COUNT query - doesn't load all recipients into memory
+      const pendingCount = await countRecipients(batchId, "pending");
 
-      if (pendingRecipients.length === 0) {
+      if (pendingCount === 0) {
         // Check if batch should be marked complete
         const hotState = getHotStateManager();
         if (await hotState.isBatchComplete(batchId)) {
@@ -186,52 +210,92 @@ export class NatsEmailWorker {
         return;
       }
 
-      // Mark all as queued
-      await db
-        .update(recipients)
-        .set({ status: "queued", updatedAt: new Date() })
-        .where(and(eq(recipients.batchId, batchId), eq(recipients.status, "pending")));
-
-      // Initialize hot state for O(1) completion checks
+      // Initialize hot state for O(1) completion checks BEFORE processing pages
       const hotState = getHotStateManager();
-      await hotState.initializeBatch(batchId, pendingRecipients.length);
+      await hotState.initializeBatch(batchId, pendingCount);
 
-      // Buffered ClickHouse logging
-      type RecipientRow = typeof pendingRecipients[number];
-      const queuedEvents = pendingRecipients.map((r: RecipientRow) => ({
-        event_type: "queued" as const,
-        module_type: embeddedConfig.module,
-        batch_id: batchId,
-        recipient_id: r.id,
-        user_id: userId,
-        email: r.identifier || r.email || "",
-      }));
-      getBufferedLogger().logEvents(queuedEvents);
-      clickhouseEventsTotal.inc({ event_type: "queued" }, queuedEvents.length);
+      // Stream recipients in pages to avoid OOM for large batches
+      // Each page: update status, log events, enqueue jobs
+      let totalEnqueued = 0;
+      let totalFailed = 0;
+      let pageCount = 0;
 
-      // Create jobs
-      const jobs: JobData[] = pendingRecipients.map((r: RecipientRow) => ({
-        batchId,
-        recipientId: r.id,
-        userId,
-        identifier: r.identifier || r.email || "",
-        email: r.email || r.identifier || undefined,
-        name: r.name || undefined,
-        variables: r.variables as Record<string, string> | undefined,
-        sendConfig: embeddedConfig,
-        payload: batch.payload as BatchPayload | undefined,
-        fromEmail: batch.fromEmail || undefined,
-        fromName: batch.fromName || undefined,
-        subject: batch.subject || undefined,
-        htmlContent: batch.htmlContent || undefined,
-        textContent: batch.textContent || undefined,
-        dryRun: batch.dryRun,
-      }));
+      for await (const page of streamRecipientPages(batchId, { pageSize: 1000, status: "pending" })) {
+        pageCount++;
+        const pageRecipients = page.recipients;
 
-      await this.queueService.enqueueEmails(userId, jobs);
+        // Mark this page as queued
+        const recipientIds = pageRecipients.map((r) => r.id);
+        await db
+          .update(recipients)
+          .set({ status: "queued", updatedAt: new Date() })
+          .where(inArray(recipients.id, recipientIds));
+
+        // Buffered ClickHouse logging for this page
+        const queuedEvents = pageRecipients.map((r: RecipientRow) => ({
+          event_type: "queued" as const,
+          module_type: embeddedConfig.module,
+          batch_id: batchId,
+          recipient_id: r.id,
+          user_id: userId,
+          email: r.identifier || r.email || "",
+        }));
+        getBufferedLogger().logEvents(queuedEvents);
+        clickhouseEventsTotal.inc({ event_type: "queued" }, queuedEvents.length);
+
+        // Create jobs for this page
+        const jobs: JobData[] = pageRecipients.map((r: RecipientRow) => ({
+          batchId,
+          recipientId: r.id,
+          userId,
+          identifier: r.identifier || r.email || "",
+          email: r.email || r.identifier || undefined,
+          name: r.name || undefined,
+          variables: r.variables as Record<string, string> | undefined,
+          sendConfig: embeddedConfig,
+          payload: batch.payload as BatchPayload | undefined,
+          fromEmail: batch.fromEmail || undefined,
+          fromName: batch.fromName || undefined,
+          subject: batch.subject || undefined,
+          htmlContent: batch.htmlContent || undefined,
+          textContent: batch.textContent || undefined,
+          dryRun: batch.dryRun,
+        }));
+
+        // Enqueue this page
+        const enqueueResult = await this.queueService.enqueueEmails(userId, jobs);
+        totalEnqueued += enqueueResult.success;
+        totalFailed += enqueueResult.failed;
+
+        // Log progress for large batches
+        if (pageCount % 10 === 0) {
+          log.batch.debug({ id: batchId, pages: pageCount, enqueued: totalEnqueued }, "pagination progress");
+        }
+      }
+
+      // Check total enqueue result and fail batch if too many dropped
+      const totalJobs = totalEnqueued + totalFailed;
+      if (totalFailed > 0 && totalJobs > 0) {
+        const failureRate = totalFailed / totalJobs;
+        if (failureRate > 0.01) { // More than 1% failed
+          throw new Error(
+            `Enqueue failed: ${totalFailed}/${totalJobs} messages dropped (${(failureRate * 100).toFixed(1)}% failure rate)`
+          );
+        }
+        log.queue.warn(
+          {
+            batchId,
+            success: totalEnqueued,
+            failed: totalFailed,
+            failureRate: `${(failureRate * 100).toFixed(2)}%`,
+          },
+          "some messages failed to enqueue (below threshold)"
+        );
+      }
+
       await this.ensureUserEmailProcessor(userId);
 
-      log.batch.info({ id: batchId, jobs: jobs.length, module: embeddedConfig.module, duration: timer() }, "enqueued");
+      log.batch.info({ id: batchId, jobs: totalEnqueued, pages: pageCount, module: embeddedConfig.module, duration: timer() }, "enqueued (paginated)");
     }, traceId);
   }
 
@@ -275,7 +339,7 @@ export class NatsEmailWorker {
     try {
       await this.startConsumerProcessor({
         consumerName: `user-${userId}`,
-        maxMessages: 500, // Increased from 100 for faster throughput ramp-up
+        maxMessages: 1000, // Match max_ack_pending for optimal throughput
         onMessage: (msg) => this.processJobMessage(msg),
         onError: async (msg, error) => {
           log.email.error({ error, seq: msg.seq, userId }, "Failed to process user email");
@@ -367,8 +431,11 @@ export class NatsEmailWorker {
       let result: JobResult;
 
       if (dryRun) {
-        const simulatedLatency = 20 + Math.random() * 80;
-        await new Promise((resolve) => setTimeout(resolve, simulatedLatency));
+        // Use minimal latency in high-throughput test mode, otherwise simulate realistic delays
+        const simulatedLatency = config.HIGH_THROUGHPUT_TEST_MODE ? 1 : (20 + Math.random() * 80);
+        if (simulatedLatency > 1) {
+          await new Promise((resolve) => setTimeout(resolve, simulatedLatency));
+        }
         result = {
           success: true,
           providerMessageId: `dry-run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,

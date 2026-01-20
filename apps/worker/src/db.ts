@@ -20,8 +20,8 @@ if (config.NODE_ENV === "test" || config.NODE_ENV === "development") {
   const { drizzle } = await import("drizzle-orm/postgres-js");
 
   const sql = postgres(config.DATABASE_URL, {
-    // Connection pool settings optimized for batch processing
-    max: 20,                    // Maximum connections in pool
+    // Connection pool settings optimized for high-throughput parallel processing
+    max: 150,                   // Increased for 1000 concurrent messages
     idle_timeout: 30,           // Close idle connections after 30 seconds
     connect_timeout: 10,        // Connection timeout in seconds
     max_lifetime: 60 * 30,      // Max connection lifetime (30 minutes)

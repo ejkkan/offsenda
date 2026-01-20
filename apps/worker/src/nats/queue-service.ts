@@ -2,6 +2,7 @@ import { JetStreamClient, StringCodec, headers as natsHeaders } from "nats";
 import type { SendConfig, SendConfigData, RateLimitConfig, ModuleType, BatchPayload } from "@batchsender/db";
 import { NatsClient } from "./client.js";
 import { log, createTimer, getTraceId } from "../logger.js";
+import { enqueueFailuresTotal } from "../metrics.js";
 
 // Job types
 export interface BatchJobData {
@@ -60,6 +61,12 @@ export interface StreamStats {
   batch: QueueStats;
   email: QueueStats;
   priority: QueueStats;
+}
+
+export interface EnqueueResult {
+  success: number;
+  failed: number;
+  errors: Array<{ email: string; error: string }>;
 }
 
 export class NatsQueueService {
@@ -152,14 +159,15 @@ export class NatsQueueService {
   }
 
   // Bulk email operations (optimized for performance)
-  async enqueueEmails(userId: string, emails: EmailJobData[]): Promise<void> {
-    if (emails.length === 0) return;
+  async enqueueEmails(userId: string, emails: EmailJobData[]): Promise<EnqueueResult> {
+    if (emails.length === 0) {
+      return { success: 0, failed: 0, errors: [] };
+    }
 
     const timer = createTimer();
     const CHUNK_SIZE = 1000;
     let successCount = 0;
-    let duplicateCount = 0;
-    const errors: any[] = [];
+    const errors: Array<{ email: string; error: string }> = [];
 
     // Process in chunks to avoid overwhelming NATS
     for (let i = 0; i < emails.length; i += CHUNK_SIZE) {
@@ -174,10 +182,14 @@ export class NatsQueueService {
         if (result.status === "fulfilled") {
           successCount++;
         } else {
+          const errorMessage = result.reason instanceof Error
+            ? result.reason.message
+            : String(result.reason);
           errors.push({
-            email: chunk[index].email,
-            error: result.reason,
+            email: chunk[index].email || chunk[index].identifier || "",
+            error: errorMessage,
           });
+          enqueueFailuresTotal.inc({ queue: "email" });
         }
       });
     }
@@ -188,16 +200,28 @@ export class NatsQueueService {
         batchId: emails[0]?.batchId,
         total: emails.length,
         success: successCount,
-        duplicates: duplicateCount,
-        errors: errors.length,
+        failed: errors.length,
         duration: timer(),
       },
       "bulk email enqueue completed"
     );
 
     if (errors.length > 0) {
-      log.queue.error({ errors: errors.slice(0, 10) }, "some emails failed to enqueue");
+      log.queue.error(
+        {
+          errors: errors.slice(0, 10),
+          totalFailed: errors.length,
+          totalAttempted: emails.length,
+        },
+        "some emails failed to enqueue"
+      );
     }
+
+    return {
+      success: successCount,
+      failed: errors.length,
+      errors,
+    };
   }
 
   // Priority email operations

@@ -1,0 +1,20 @@
+# Install operator first:
+# kubectl apply -f https://raw.githubusercontent.com/dragonflydb/dragonfly-operator/main/manifests/dragonfly-operator.yaml
+
+apiVersion: dragonflydb.io/v1alpha1
+kind: Dragonfly
+metadata:
+  name: dragonfly
+  namespace: batchsender
+spec:
+  replicas: 3  # 1 master + 2 replicas, auto-failover
+  resources:
+    requests:
+      cpu: "1"
+      memory: 4Gi
+    limits:
+      cpu: "4"
+      memory: 16Gi
+  args:
+    - "--maxmemory"
+    - "14gb"

@@ -1,3 +1,7 @@
+# Note: Dragonfly Operator creates its own service that routes to the master.
+# This service provides a stable endpoint that can be used before or alongside the operator.
+# When using the operator, the operator's service (also named 'dragonfly') will handle
+# routing to the master instance automatically.
 apiVersion: v1
 kind: Service
 metadata:
@@ -6,7 +10,8 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    app: dragonfly
+    app.kubernetes.io/name: dragonfly
+    app.kubernetes.io/instance: dragonfly
   ports:
   - port: 6379
     targetPort: 6379

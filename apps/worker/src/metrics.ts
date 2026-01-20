@@ -261,6 +261,50 @@ export const webhookQueueDepth = new promClient.Gauge({
   help: 'Number of webhooks in processing buffer',
 });
 
+// ============================================
+// Failure Tracking Metrics
+// ============================================
+
+/**
+ * Counter: Total enqueue failures
+ * Labels: queue (batch/email/priority)
+ */
+export const enqueueFailuresTotal = new promClient.Counter({
+  name: 'enqueue_failures_total',
+  help: 'Total number of messages that failed to enqueue',
+  labelNames: ['queue'],
+});
+
+/**
+ * Counter: Total ClickHouse write failures
+ * Labels: operation (insert/query)
+ */
+export const clickhouseWriteFailuresTotal = new promClient.Counter({
+  name: 'clickhouse_write_failures_total',
+  help: 'Total number of ClickHouse write failures',
+  labelNames: ['operation'],
+});
+
+/**
+ * Counter: Total Dragonfly circuit breaker failures
+ * Labels: operation (record_success/record_failure/check)
+ */
+export const dragonflyCircuitBreakerFailuresTotal = new promClient.Counter({
+  name: 'dragonfly_circuit_breaker_failures_total',
+  help: 'Total number of Dragonfly circuit breaker operation failures',
+  labelNames: ['operation'],
+});
+
+/**
+ * Counter: Total buffer items dropped
+ * Labels: buffer_type (clickhouse/webhook/etc)
+ */
+export const bufferItemsDroppedTotal = new promClient.Counter({
+  name: 'buffer_items_dropped_total',
+  help: 'Total number of items dropped from buffers due to errors',
+  labelNames: ['buffer_type'],
+});
+
 /**
  * Histogram: Webhook processing duration
  * Labels: status (success/error)

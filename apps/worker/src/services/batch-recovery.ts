@@ -3,6 +3,7 @@ import { batches, recipients } from "@batchsender/db";
 import { db } from "../db.js";
 import { log, createTimer } from "../logger.js";
 import { batchesProcessedTotal } from "../metrics.js";
+import type { LeaderElectionService } from "./leader-election.js";
 
 // =============================================================================
 // Batch Recovery Service
@@ -65,14 +66,19 @@ const FINAL_RECIPIENT_STATES = ["sent", "delivered", "bounced", "complained", "f
 
 /**
  * Batch Recovery Service - detects and recovers stuck batches
+ *
+ * IMPORTANT: Only runs on the leader worker to prevent duplicate processing
+ * across multiple worker instances.
  */
 export class BatchRecoveryService {
   private config: BatchRecoveryConfig;
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private isRunning = false;
+  private leaderElection?: LeaderElectionService;
 
-  constructor(config: Partial<BatchRecoveryConfig> = {}) {
+  constructor(config: Partial<BatchRecoveryConfig> = {}, leaderElection?: LeaderElectionService) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.leaderElection = leaderElection;
   }
 
   /**
@@ -125,6 +131,19 @@ export class BatchRecoveryService {
    * Run a single recovery scan
    */
   async runScan(): Promise<RecoveryScanResult> {
+    // Only run if we're the leader (or no leader election configured)
+    if (this.leaderElection && !this.leaderElection.isCurrentLeader()) {
+      return {
+        scannedAt: new Date(),
+        stuckBatchesFound: 0,
+        batchesRecovered: 0,
+        batchesFailed: 0,
+        durationMs: 0,
+        recoveredBatchIds: [],
+        failedBatchIds: [],
+      };
+    }
+
     // Prevent concurrent scans
     if (this.isRunning) {
       log.system.debug({}, "recovery scan already in progress, skipping");

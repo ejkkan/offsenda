@@ -5,6 +5,7 @@ import { db } from "../db.js";
 import { log } from "../logger.js";
 import { logEmailEvent, type EmailEventType } from "../clickhouse.js";
 import type { NatsClient } from "../nats/client.js";
+import { enqueueFailuresTotal } from "../metrics.js";
 
 // =============================================================================
 // Webhook Queue Types
@@ -279,7 +280,18 @@ export class WebhookQueueProcessor {
 
       // Re-queue failed events
       for (const event of batch) {
-        await this.enqueueWebhook(event).catch(() => {});
+        await this.enqueueWebhook(event).catch((requeueErr) => {
+          log.webhook.error(
+            {
+              error: (requeueErr as Error).message,
+              eventId: event.id,
+              provider: event.provider,
+              eventType: event.eventType,
+            },
+            "failed to re-queue webhook event"
+          );
+          enqueueFailuresTotal.inc({ queue: "webhook" });
+        });
       }
     } finally {
       this.isProcessing = false;

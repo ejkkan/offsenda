@@ -78,15 +78,15 @@ function buildContext(
 export async function acquireRateLimit(
   sendConfig: EmbeddedSendConfig,
   userId: string,
-  timeout: number = 5000
+  timeout: number = 1000
 ): Promise<ComposedRateLimitResult> {
-  // Skip if rate limiting is disabled
-  if (config.DISABLE_RATE_LIMIT) {
+  // Skip if rate limiting is disabled or in high-throughput test mode
+  if (config.DISABLE_RATE_LIMIT || config.HIGH_THROUGHPUT_TEST_MODE) {
     return { allowed: true };
   }
 
   // Get the per-config rate limit (from sendConfig)
-  const configRateLimit = sendConfig.rateLimit?.perSecond || 100;
+  const configRateLimit = sendConfig.rateLimit?.perSecond || 1000;
 
   // Build context based on managed vs BYOK
   const context = buildContext(sendConfig, userId);
@@ -127,7 +127,7 @@ export async function getRateLimitStatus(
   }
 
   const context = buildContext(sendConfig, userId);
-  const configRateLimit = sendConfig.rateLimit?.perSecond || 100;
+  const configRateLimit = sendConfig.rateLimit?.perSecond || 1000;
   const registry = getRateLimitRegistry();
 
   return registry.getStatus(context, configRateLimit);

@@ -29,6 +29,7 @@ const envSchema = z.object({
   CLICKHOUSE_DATABASE: z.string().default("batchsender"),
 
   // Dragonfly (distributed rate limiting)
+  // Operator handles HA behind the service - just connect to the single endpoint
   DRAGONFLY_URL: z.string().default("localhost:6379"),
 
   // Email provider
@@ -63,7 +64,7 @@ const envSchema = z.object({
   // Processing settings
   BATCH_SIZE: z.coerce.number().default(100),
   POLL_INTERVAL_MS: z.coerce.number().default(2000),
-  RATE_LIMIT_PER_SECOND: z.coerce.number().default(100), // Per-user rate limit
+  RATE_LIMIT_PER_SECOND: z.coerce.number().default(1000), // Per-user rate limit (increased for high-throughput)
   CONCURRENT_BATCHES: z.coerce.number().default(50), // Parallel batch processing (was 10)
   MAX_CONCURRENT_EMAILS: z.coerce.number().default(200), // Total concurrent email jobs (was 50)
 
@@ -83,7 +84,7 @@ const envSchema = z.object({
   MANAGED_SES_RATE_LIMIT: z.coerce.number().default(14), // AWS SES default limit
   MANAGED_RESEND_RATE_LIMIT: z.coerce.number().default(100), // Resend rate limit
   MANAGED_TELNYX_RATE_LIMIT: z.coerce.number().default(50), // Telnyx SMS rate limit
-  MANAGED_MOCK_RATE_LIMIT: z.coerce.number().default(5000), // Mock provider for testing
+  MANAGED_MOCK_RATE_LIMIT: z.coerce.number().default(50000), // Mock provider for testing (10x increase for stress tests)
 
   // SMS provider for managed mode
   SMS_PROVIDER: z.enum(["telnyx", "mock"]).default("mock"),
@@ -140,6 +141,9 @@ const envSchema = z.object({
   // =============================================================================
   // High-Throughput Processing
   // =============================================================================
+  // Test mode that skips rate limiting entirely for stress tests
+  HIGH_THROUGHPUT_TEST_MODE: stringBoolean.default(false),
+
   // Buffered ClickHouse logging
   CLICKHOUSE_BUFFER_SIZE: z.coerce.number().default(10000), // Max events before forced flush
   CLICKHOUSE_FLUSH_INTERVAL_MS: z.coerce.number().default(5000), // 5 seconds

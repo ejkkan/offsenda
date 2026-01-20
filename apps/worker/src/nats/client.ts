@@ -204,7 +204,7 @@ export class NatsClient {
           ack_policy: AckPolicy.Explicit,
           ack_wait: name === "batch-processor" ? 5 * 60 * 1e9 : 30 * 1e9, // 5 min for batch, 30s for others
           max_deliver: name === "batch-processor" ? 3 : 5,
-          max_ack_pending: name === "batch-processor" ? 50 : 200, // Increased from 10 to match concurrent batches
+          max_ack_pending: name === "batch-processor" ? 200 : 1000, // Increased for high-throughput processing
           deliver_policy: DeliverPolicy.All,
           replay_policy: ReplayPolicy.Instant,
         });
@@ -239,7 +239,7 @@ export class NatsClient {
         ack_policy: AckPolicy.Explicit,
         ack_wait: 30 * 1e9, // 30 seconds
         max_deliver: 5,
-        max_ack_pending: 100,
+        max_ack_pending: 1000, // Allow 1000 in-flight messages per user for high throughput
         // Note: rate_limit_bps not supported for pull consumers
         inactive_threshold: 3600 * 1e9, // Auto-delete after 1 hour of inactivity
         deliver_policy: DeliverPolicy.All,

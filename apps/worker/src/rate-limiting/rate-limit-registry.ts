@@ -24,6 +24,9 @@ interface TokenBucketState {
 
 /**
  * Manages rate limiters with composable checks for managed and BYOK flows
+ *
+ * Uses a simple Redis connection - the Dragonfly Operator handles HA/failover
+ * behind the service endpoint.
  */
 export class RateLimitRegistry {
   private redis: Redis;
@@ -31,25 +34,29 @@ export class RateLimitRegistry {
 
   constructor(redis?: Redis) {
     if (redis) {
+      // Test mode: use injected Redis
       this.redis = redis;
       this.isConnected = true;
     } else {
-      const dragonflyUrl = config.DRAGONFLY_URL || "localhost:6379";
+      // Production mode: simple Redis connection
+      // Dragonfly Operator handles HA behind the service
+      const [host, portStr] = config.DRAGONFLY_URL.split(":");
+      const port = parseInt(portStr || "6379");
+
       this.redis = new Redis({
-        host: dragonflyUrl.split(":")[0] || "localhost",
-        port: parseInt(dragonflyUrl.split(":")[1] || "6379"),
+        host: host || "localhost",
+        port,
         maxRetriesPerRequest: 3,
         retryStrategy: (times) => Math.min(times * 50, 2000),
         lazyConnect: true,
       });
 
       this.redis.on("error", (error) => {
-        log.rateLimit.error({ error }, "Rate limit registry Redis error");
-        this.isConnected = false;
+        log.rateLimit.error({ error }, "Dragonfly connection error");
       });
 
       this.redis.on("connect", () => {
-        this.isConnected = true;
+        log.rateLimit.debug({}, "Dragonfly connected");
       });
     }
   }
@@ -92,7 +99,7 @@ export class RateLimitRegistry {
 
       // Calculate wait time based on the limiting factor
       const waitTime = Math.min(
-        result.waitTimeMs || 50,
+        result.waitTimeMs || 5, // Reduced from 50ms for faster throughput
         timeout - (Date.now() - startTime)
       );
 
@@ -220,7 +227,10 @@ export class RateLimitRegistry {
       const args: (string | number)[] = [now, limiters.length];
       for (const limiter of limiters) {
         args.push(limiter.config.tokensPerSecond);
-        args.push(limiter.config.burstCapacity || limiter.config.tokensPerSecond);
+        // Allow 2-second burst capacity for faster ramp-up, minimum 1000
+        const burstCapacity = limiter.config.burstCapacity ||
+          Math.max(limiter.config.tokensPerSecond * 2, 1000);
+        args.push(burstCapacity);
       }
 
       const result = (await this.redis.eval(
