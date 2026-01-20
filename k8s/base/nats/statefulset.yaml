@@ -32,6 +32,8 @@ spec:
           name: client
         - containerPort: 6222
           name: cluster
+        - containerPort: 7222
+          name: gateway
         - containerPort: 8222
           name: monitor
         resources:

@@ -1,10 +1,15 @@
 import promClient from 'prom-client';
 
 // Initialize Prometheus default metrics (CPU, memory, etc.)
-promClient.collectDefaultMetrics({
-  prefix: 'worker_',
-  gcDurationBuckets: [0.001, 0.01, 0.1, 1, 2, 5],
-});
+// Guard against multiple registrations (e.g., in test environments)
+const defaultMetricsInitialized = (globalThis as any).__prometheusDefaultMetricsInitialized;
+if (!defaultMetricsInitialized) {
+  promClient.collectDefaultMetrics({
+    prefix: 'worker_',
+    gcDurationBuckets: [0.001, 0.01, 0.1, 1, 2, 5],
+  });
+  (globalThis as any).__prometheusDefaultMetricsInitialized = true;
+}
 
 // Create a registry for all metrics
 export const register = promClient.register;

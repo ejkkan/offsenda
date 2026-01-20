@@ -1,3 +1,16 @@
+/**
+ * API Rate Limiter
+ *
+ * Rate limits incoming HTTP API requests by IP address.
+ * Uses sliding window log algorithm with Redis/Dragonfly.
+ *
+ * This is SEPARATE from message processing rate limiting (see rate-limiting/ directory).
+ *
+ * Rate limiting architecture:
+ * - API requests: This file (per IP, requests/minute)
+ * - Message processing: rate-limiting/index.ts (per provider/config, messages/second)
+ */
+
 import Redis from "ioredis";
 import { config } from "./config.js";
 import { log } from "./logger.js";

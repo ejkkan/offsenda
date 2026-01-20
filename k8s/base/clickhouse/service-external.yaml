@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse-external
+  namespace: batchsender
+  labels:
+    app: clickhouse
+  annotations:
+    # Hetzner Load Balancer annotations
+    load-balancer.hetzner.cloud/name: "clickhouse-external"
+    load-balancer.hetzner.cloud/location: "fsn1"  # Falkenstein only
+    load-balancer.hetzner.cloud/use-private-ip: "true"
+spec:
+  type: LoadBalancer
+  ports:
+    - name: http
+      port: 8123
+      targetPort: 8123
+      protocol: TCP
+    - name: native
+      port: 9000
+      targetPort: 9000
+      protocol: TCP
+  selector:
+    app: clickhouse

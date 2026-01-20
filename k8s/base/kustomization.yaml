@@ -12,28 +12,28 @@ resources:
   - postgres/statefulset.yaml
   - postgres/service.yaml
   - postgres/init-configmap.yaml
-  # DragonflyDB - For distributed rate limiting
-  - dragonfly/statefulset.yaml
+  # DragonflyDB - For distributed rate limiting (uses operator)
+  - dragonfly/operator.yaml
   - dragonfly/service.yaml
   - dragonfly/networkpolicy.yaml
   # NATS - Message queue with TLS
   - nats/statefulset.yaml
   - nats/service.yaml
+  - nats/service-gateway.yaml
   - nats/configmap.yaml
   - nats/certificate.yaml
   - nats/hpa.yaml
   - nats/networkpolicy.yaml
+  - nats/pdb.yaml
   # ClickHouse cluster (3 replicas)
   - clickhouse/statefulset.yaml
   - clickhouse/service.yaml
+  - clickhouse/service-external.yaml
   - clickhouse/headless-service.yaml
   - clickhouse/init-configmap.yaml
   - clickhouse/init-job.yaml
-  # Migrated to External Secrets - commented out for safe transition
   - clickhouse/sealed-secrets.yaml
   - clickhouse/sealed-b2-secret.yaml
-  # - clickhouse/external-secret.yaml
-  # - clickhouse/b2-external-secret.yaml
   - clickhouse/storage-configmap.yaml
   - clickhouse/cluster-configmap.yaml
   - clickhouse/keeper-configmap.yaml
@@ -42,9 +42,7 @@ resources:
   - clickhouse/networkpolicy.yaml
   # Worker - Email processing workers
   - worker/configmap.yaml
-  # Migrated to External Secrets
   - worker/sealed-secrets.yaml
-  # - worker/external-secret.yaml
   - worker/deployment.yaml
   - worker/migration-job.yaml
   - worker/service.yaml
@@ -53,11 +51,11 @@ resources:
   # KEDA ScaledObject for instant autoscaling (replaces HPA)
   - worker/keda-scaledobject.yaml
   # worker/hpa.yaml - DISABLED: conflicts with KEDA (only use one or the other)
+  - worker/pdb.yaml
   # Web App - Next.js frontend
   - web/configmap.yaml
-  # Migrated to External Secrets
   - web/sealed-secrets.yaml
-  # - web/external-secret.yaml
   - web/deployment.yaml
   - web/service.yaml
   - web/ingress.yaml
+  - web/pdb.yaml

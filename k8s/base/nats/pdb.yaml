@@ -1,0 +1,11 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nats-pdb
+  namespace: batchsender
+spec:
+  # For 3-node NATS cluster, need at least 2 for quorum
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: nats

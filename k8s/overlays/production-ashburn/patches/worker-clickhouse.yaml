@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+spec:
+  template:
+    spec:
+      containers:
+        - name: worker
+          env:
+            # Point to ClickHouse in Falkenstein region
+            - name: CLICKHOUSE_URL
+              value: "http://clickhouse.batchsender.com:8123"
+            # Region identifier
+            - name: REGION
+              value: "ashburn"

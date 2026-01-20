@@ -1,0 +1,144 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: batchsender
+
+resources:
+  - ../../base
+
+# Image tags - updated by CI pipeline (same images as Falkenstein)
+images:
+  - name: registry.localhost:5000/worker
+    newName: ghcr.io/ejkkan/offsenda-worker
+    newTag: main-34dde73
+  - name: registry.localhost:5000/web
+    newName: ghcr.io/ejkkan/offsenda-web
+    newTag: main-e2426ec
+  - name: registry.localhost:5000/migration
+    newName: ghcr.io/ejkkan/offsenda-migration
+    newTag: main-34dde73
+
+# Production patches for Ashburn region
+patches:
+  # Exclude in-cluster PostgreSQL - using external database via DATABASE_URL
+  - patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: postgres
+        namespace: batchsender
+    target:
+      kind: StatefulSet
+      name: postgres
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: postgres
+        namespace: batchsender
+    target:
+      kind: Service
+      name: postgres
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: postgres-init
+        namespace: batchsender
+    target:
+      kind: ConfigMap
+      name: postgres-init
+
+  # Worker config - point to Falkenstein ClickHouse, local NATS
+  - patch: |-
+      - op: replace
+        path: /data/EMAIL_PROVIDER
+        value: resend
+      - op: replace
+        path: /data/NODE_ENV
+        value: production
+      - op: replace
+        path: /data/NATS_TLS_ENABLED
+        value: "true"
+      - op: replace
+        path: /data/NATS_CLUSTER
+        value: "tls://nats.batchsender.svc:4222"
+      - op: add
+        path: /data/REGION
+        value: "ashburn"
+      - op: add
+        path: /data/PRIMARY_REGION
+        value: "falkenstein"
+    target:
+      kind: ConfigMap
+      name: worker-config
+
+  # Worker resources
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 200m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 512Mi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: 1000m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 1Gi
+    target:
+      kind: Deployment
+      name: worker
+
+  # KEDA autoscaling
+  - patch: |-
+      - op: replace
+        path: /spec/maxReplicaCount
+        value: 50
+      - op: replace
+        path: /spec/minReplicaCount
+        value: 2
+    target:
+      kind: ScaledObject
+      name: worker-scaler
+
+  # NATS gateway service - update location for Ashburn
+  - patch: |-
+      - op: replace
+        path: /metadata/annotations/load-balancer.hetzner.cloud~1location
+        value: ash
+    target:
+      kind: Service
+      name: nats-gateway
+
+  # Remove ClickHouse resources (Ashburn uses Falkenstein's ClickHouse)
+  # This is done by scaling to 0 and not deploying external service
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 0
+    target:
+      kind: StatefulSet
+      name: clickhouse
+
+  # Worker - point to Falkenstein ClickHouse
+  - path: patches/worker-clickhouse.yaml
+    target:
+      kind: Deployment
+      name: worker
+
+  # NATS uses base config (3 replicas) for HA
+  # Override NATS config for Ashburn region with gateway to Falkenstein
+  - path: nats-configmap.yaml
+    target:
+      kind: ConfigMap
+      name: nats-config
+
+# Region-specific labels
+labels:
+  - pairs:
+      region: ashburn

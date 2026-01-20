@@ -3,7 +3,7 @@ version: "3.8"
 services:
   # NATS with JetStream for queue management
   nats:
-    image: nats:latest
+    image: nats:2.10-alpine
     container_name: batchsender-test-nats
     ports:
       - "4222:4222" # Client connections
@@ -19,7 +19,7 @@ services:
 
   # PostgreSQL for application data
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: batchsender-test-postgres
     environment:
       POSTGRES_DB: batchsender_test
@@ -39,7 +39,7 @@ services:
 
   # ClickHouse for analytics and event logging
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:24-alpine
     container_name: batchsender-test-clickhouse
     environment:
       CLICKHOUSE_DB: batchsender_test
@@ -55,6 +55,23 @@ services:
       retries: 10
     volumes:
       - clickhouse-test-data:/var/lib/clickhouse
+    networks:
+      - test-network
+
+  # Dragonfly for rate limiting and hot state
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.14.0
+    container_name: batchsender-test-dragonfly
+    ports:
+      - "6380:6379"  # Use 6380 to avoid conflicts with local Redis
+    command: >
+      --maxmemory=512mb
+      --proactor_threads=2
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     networks:
       - test-network
 

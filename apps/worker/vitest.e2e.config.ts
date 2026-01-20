@@ -18,6 +18,8 @@ export default defineConfig({
     // Longer timeout for E2E tests (large batches can take time)
     testTimeout: 300000, // 5 minutes per test
     hookTimeout: 60000, // 1 minute for setup/teardown
+    // Setup files run BEFORE test collection (sets env vars before imports)
+    setupFiles: ["./test/setup-env.ts"],
     // Global setup and teardown (automatically manages Docker)
     globalSetup: "./test/setup.ts",
     // Don't bail on first failure - run all tests

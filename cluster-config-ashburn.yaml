@@ -1,0 +1,123 @@
+# =============================================================================
+# BatchSender US Cluster Configuration (hetzner-k3s) - Ashburn, Virginia
+# =============================================================================
+#
+# This creates the US region cluster for multi-region HA:
+# - 1 master (upgrade to 3 for full HA)
+# - 2 worker nodes with autoscaling
+# - Full Hetzner integration (CCM, CSI, autoscaler)
+#
+# Prerequisites:
+# 1. Hetzner API token in .env.hetzner
+# 2. SSH keys at ~/.ssh/id_ed25519
+#
+# Usage:
+#   hetzner-k3s create --config cluster-config-ashburn.yaml
+#
+# To destroy:
+#   hetzner-k3s delete --config cluster-config-ashburn.yaml
+#
+# =============================================================================
+
+# Hetzner Cloud API token (same as Falkenstein - from .env.hetzner)
+# IMPORTANT: Replace with your actual token or source from .env.hetzner
+hetzner_token: "${HETZNER_TOKEN}"
+
+# Cluster identification
+cluster_name: batchsender-ashburn
+kubeconfig_path: "./kubeconfig-ashburn"
+protect_against_deletion: false
+
+# k3s version (match Falkenstein cluster)
+k3s_version: v1.32.0+k3s1
+
+# Networking configuration
+networking:
+  ssh:
+    port: 22
+    use_agent: false
+    public_key_path: "~/.ssh/id_ed25519.pub"
+    private_key_path: "~/.ssh/id_ed25519"
+
+  # Allowed networks for SSH and API access
+  allowed_networks:
+    ssh:
+      - 0.0.0.0/0  # Allow SSH from anywhere (secure via SSH keys)
+    api:
+      - 0.0.0.0/0  # Allow k8s API from anywhere (secure via kubeconfig)
+
+# Master nodes (control plane)
+masters_pool:
+  instance_type: cx32   # 4 vCPU, 8GB RAM (upgraded for HA)
+  instance_count: 1     # Start with 1, upgrade to 3 for full HA
+
+  # Ashburn, Virginia (US East)
+  locations:
+    - ash
+
+  # Image to use (Ubuntu 24.04 LTS)
+  image: ubuntu-24.04
+
+# Worker node pools
+worker_node_pools:
+  # Main worker pool with autoscaling
+  - name: workers
+    instance_type: cx32        # 4 vCPU, 8GB RAM
+    instance_count: 2          # Start with 2 workers
+    location: ash              # Ashburn, Virginia
+    image: ubuntu-24.04
+
+    # Autoscaling configuration
+    autoscaling:
+      enabled: true
+      min_instances: 2         # Always keep at least 2 workers (HA)
+      max_instances: 10        # Scale up to 10 workers during high load
+
+    # Labels for pod scheduling
+    labels:
+      - key: "workload"
+        value: "general"
+      - key: "environment"
+        value: "production"
+      - key: "region"
+        value: "ashburn"
+
+    # No taints (workers can run any pods)
+    taints: []
+
+# Additional settings
+# Use private network for node-to-node communication (more secure)
+private_network:
+  enabled: true
+  subnet: "10.1.0.0/16"  # Different subnet from Falkenstein (10.0.0.0/16)
+
+# Firewall rules
+firewall:
+  enabled: true
+
+  # Allow inbound traffic only on necessary ports
+  allow_incoming:
+    - protocol: tcp
+      port: "6443"    # Kubernetes API
+    - protocol: tcp
+      port: "22"      # SSH
+    - protocol: tcp
+      port: "80"      # HTTP (for load balancers)
+    - protocol: tcp
+      port: "443"     # HTTPS (for load balancers)
+    - protocol: tcp
+      port: "7222"    # NATS Gateway (for cross-region)
+
+# Enable Hetzner integrations
+hetzner_ccm_version: latest
+hetzner_csi_version: latest
+
+# k3s configuration
+k3s_config:
+  disable:
+    - traefik
+    - servicelb  # Use Hetzner LB instead
+
+  # Enable useful k3s features
+  tls-san:
+    - batchsender-ashburn.hetzner.cloud

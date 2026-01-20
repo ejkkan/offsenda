@@ -6,7 +6,8 @@ services:
     volumes:
       - dragonfly-data:/data
     command: >
-      --maxmemory=2gb
+      --maxmemory=512mb
+      --proactor_threads=2
       --dir=/data
 
 volumes:

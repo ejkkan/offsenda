@@ -21,30 +21,64 @@ export interface EmbeddedSendConfig {
   rateLimit?: RateLimitConfig | null;
 }
 
+/**
+ * Job data for processing a single recipient.
+ *
+ * Uses `identifier` for the recipient address (works for email, phone, URL, etc.)
+ * and `payload` for module-specific content.
+ *
+ * Legacy fields (email, fromEmail, subject, etc.) are kept for backwards
+ * compatibility with existing database records. New code should use `payload`.
+ */
 export interface JobData {
   batchId: string;
   recipientId: string;
   userId: string;
-  // GENERIC: Works for any channel (email, phone, device token, URL)
+
+  /** Recipient address - works for any channel (email, phone, device token, URL) */
   identifier: string;
-  // LEGACY: Email address (for backwards compatibility)
-  email?: string;
+
+  /** Recipient display name */
   name?: string;
+
+  /** Variable substitutions for templates */
   variables?: Record<string, string>;
-  // Embedded send config (no DB lookup needed during processing)
+
+  /** Embedded send config (no DB lookup needed during processing) */
   sendConfig: EmbeddedSendConfig;
-  // GENERIC: Module-specific payload (new)
+
+  /** Module-specific payload - PREFERRED for new code */
   payload?: BatchPayload;
-  // LEGACY: Email-specific fields (for backwards compatibility)
-  fromEmail?: string;
-  fromName?: string;
-  subject?: string;
-  htmlContent?: string;
-  textContent?: string;
-  // Webhook-specific fields (for webhook module)
-  data?: Record<string, unknown>;
-  // Dry run mode - skip actual outbound calls
+
+  /** Dry run mode - skip actual outbound calls */
   dryRun?: boolean;
+
+  /** Webhook-specific data (for webhook module) */
+  data?: Record<string, unknown>;
+
+  // ===========================================================================
+  // LEGACY FIELDS - Kept for backwards compatibility with existing DB records
+  // New batches should use `payload` instead. These fields will be removed
+  // after database migration consolidates to payload-only storage.
+  // ===========================================================================
+
+  /** @deprecated Use `identifier` instead */
+  email?: string;
+
+  /** @deprecated Use `payload.fromEmail` instead */
+  fromEmail?: string;
+
+  /** @deprecated Use `payload.fromName` instead */
+  fromName?: string;
+
+  /** @deprecated Use `payload.subject` instead */
+  subject?: string;
+
+  /** @deprecated Use `payload.htmlContent` instead */
+  htmlContent?: string;
+
+  /** @deprecated Use `payload.textContent` instead */
+  textContent?: string;
 }
 
 // Legacy alias for backwards compatibility

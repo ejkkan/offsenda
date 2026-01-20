@@ -4,7 +4,7 @@ kind: Kustomization
 resources:
 - ../../base
 
-# Image tags - updated by CI pipeline
+# Image tags - same as production, updated by CI pipeline
 images:
 - name: registry.localhost:5000/worker
   newName: ghcr.io/ejkkan/offsenda-worker
@@ -48,27 +48,95 @@ patches:
   target:
     kind: ConfigMap
     name: postgres-init
-# Worker config for production
+
+# Worker config for staging
 - patch: |-
     - op: replace
       path: /data/EMAIL_PROVIDER
       value: resend
     - op: replace
       path: /data/NODE_ENV
-      value: production
+      value: staging
     - op: replace
       path: /data/NATS_TLS_ENABLED
       value: "true"
     - op: replace
       path: /data/NATS_CLUSTER
       value: "tls://nats.batchsender.svc:4222"
-    - op: add
-      path: /data/ENABLE_TEST_SETUP_API
-      value: "true"
   target:
     kind: ConfigMap
     name: worker-config
-# Worker resources for production
+
+# Worker - reduced resources for staging
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: 100m
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: 256Mi
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: 500m
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: 512Mi
+  target:
+    kind: Deployment
+    name: worker
+
+# KEDA - lower thresholds for staging (scale up faster with less load)
+- patch: |-
+    - op: replace
+      path: /spec/maxReplicaCount
+      value: 10
+    - op: replace
+      path: /spec/minReplicaCount
+      value: 1
+  target:
+    kind: ScaledObject
+    name: worker-scaler
+
+# NATS - single replica for staging (no HA, cost savings)
+- patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 1
+  target:
+    kind: StatefulSet
+    name: nats
+
+# NATS HPA - reduced for staging
+- patch: |-
+    - op: replace
+      path: /spec/minReplicas
+      value: 1
+    - op: replace
+      path: /spec/maxReplicas
+      value: 3
+  target:
+    kind: HorizontalPodAutoscaler
+    name: nats-hpa
+
+# NATS PDB - allow all pods to be evicted in staging
+- patch: |-
+    - op: replace
+      path: /spec/minAvailable
+      value: 0
+  target:
+    kind: PodDisruptionBudget
+    name: nats-pdb
+
+# Web - single replica for staging
+- patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 1
+  target:
+    kind: Deployment
+    name: web
+
+# ClickHouse - reduced resources for staging
 - patch: |-
     - op: replace
       path: /spec/template/spec/containers/0/resources/requests/cpu
@@ -81,23 +149,12 @@ patches:
       value: 1000m
     - op: replace
       path: /spec/template/spec/containers/0/resources/limits/memory
-      value: 1Gi
+      value: 2Gi
   target:
-    kind: Deployment
-    name: worker
-# KEDA autoscaling for production
-- patch: |-
-    - op: replace
-      path: /spec/maxReplicaCount
-      value: 50
-    - op: replace
-      path: /spec/minReplicaCount
-      value: 2
-  target:
-    kind: ScaledObject
-    name: worker-scaler
-# Override NATS config for production TLS cluster
-- path: nats-configmap.yaml
-  target:
-    kind: ConfigMap
-    name: nats-config
+    kind: StatefulSet
+    name: clickhouse
+
+# Staging labels
+labels:
+- pairs:
+    environment: staging

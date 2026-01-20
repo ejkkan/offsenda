@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: worker-pdb
+  namespace: batchsender
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: worker

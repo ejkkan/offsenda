@@ -18,6 +18,8 @@ export default defineConfig({
     // Reasonable timeout for integration tests
     testTimeout: 30000, // 30 seconds per test
     hookTimeout: 60000, // 1 minute for setup/teardown
+    // Setup files run BEFORE test collection (sets env vars before imports)
+    setupFiles: ["./test/setup-env.ts"],
     // Global setup and teardown (automatically manages Docker)
     globalSetup: "./test/setup-integration.ts",
     // Don't bail on first failure

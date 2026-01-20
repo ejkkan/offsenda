@@ -11,7 +11,7 @@ import { batches } from "@batchsender/db";
 import { eq } from "drizzle-orm";
 import { db } from "./db.js";
 import { log } from "./logger.js";
-import { RateLimiterService } from "./rate-limiter.js";
+import { RateLimiterService } from "./api-rate-limiter.js";
 
 // NATS imports
 import { NatsClient } from "./nats/client.js";

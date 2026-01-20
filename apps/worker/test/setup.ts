@@ -74,6 +74,7 @@ async function startInfrastructure(): Promise<void> {
   process.env.CLICKHOUSE_USER = "test";
   process.env.CLICKHOUSE_PASSWORD = "test";
   process.env.CLICKHOUSE_DATABASE = "batchsender_test";
+  process.env.DRAGONFLY_URL = "localhost:6380"; // Test Dragonfly instance
   process.env.WEBHOOK_SECRET = "test-webhook-secret";
   process.env.DISABLE_RATE_LIMIT = "true"; // Disable rate limiting for E2E tests
 
@@ -114,6 +115,18 @@ async function startInfrastructure(): Promise<void> {
     try {
       const response = await fetch("http://localhost:8124/ping");
       return response.ok;
+    } catch {
+      return false;
+    }
+  }, 45000); // 45 seconds timeout
+
+  await waitForService("Dragonfly", async () => {
+    try {
+      execSync(
+        `docker exec batchsender-test-dragonfly redis-cli ping`,
+        { stdio: "pipe" }
+      );
+      return true;
     } catch {
       return false;
     }
@@ -163,6 +176,7 @@ async function startWorker(): Promise<void> {
       CLICKHOUSE_PASSWORD: "test",
       CLICKHOUSE_DATABASE: "batchsender_test",
       CLICKHOUSE_FLUSH_INTERVAL_MS: "500", // Fast flush for tests (default is 5000ms)
+      DRAGONFLY_URL: "localhost:6380", // Test Dragonfly instance
       WEBHOOK_SECRET: "test-webhook-secret",
       DISABLE_RATE_LIMIT: "true", // Disable rate limiting for E2E tests
     },

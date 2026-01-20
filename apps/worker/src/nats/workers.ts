@@ -244,22 +244,26 @@ export class NatsEmailWorker {
         clickhouseEventsTotal.inc({ event_type: "queued" }, queuedEvents.length);
 
         // Create jobs for this page
+        // NOTE: Both `payload` (preferred) and legacy fields are included for backwards
+        // compatibility. The payload builder handles priority: payload > legacy > config.
+        // Legacy fields will be removed after database migration to payload-only storage.
         const jobs: JobData[] = pageRecipients.map((r: RecipientRow) => ({
           batchId,
           recipientId: r.id,
           userId,
           identifier: r.identifier || r.email || "",
-          email: r.email || r.identifier || undefined,
           name: r.name || undefined,
           variables: r.variables as Record<string, string> | undefined,
           sendConfig: embeddedConfig,
           payload: batch.payload as BatchPayload | undefined,
+          dryRun: batch.dryRun,
+          // Legacy fields - kept for backwards compatibility with existing batches
+          email: r.email || r.identifier || undefined,
           fromEmail: batch.fromEmail || undefined,
           fromName: batch.fromName || undefined,
           subject: batch.subject || undefined,
           htmlContent: batch.htmlContent || undefined,
           textContent: batch.textContent || undefined,
-          dryRun: batch.dryRun,
         }));
 
         // Enqueue this page

@@ -5,7 +5,7 @@ metadata:
   namespace: batchsender
 data:
   nats.conf: |
-    # NATS Server Configuration with TLS (Production 3-node cluster - Falkenstein)
+    # NATS Server Configuration with TLS (Production 3-node cluster - Ashburn)
 
     # Server identification
     server_name: $POD_NAME
@@ -22,7 +22,7 @@ data:
 
     # Cluster connections (TLS between NATS nodes in same region)
     cluster {
-      name: falkenstein
+      name: ashburn
       port: 6222
 
       tls {
@@ -40,9 +40,9 @@ data:
       ]
     }
 
-    # Gateway connections (cross-region communication)
+    # Gateway connections (cross-region communication to Falkenstein)
     gateway {
-      name: falkenstein
+      name: ashburn
       port: 7222
 
       tls {
@@ -56,9 +56,9 @@ data:
       # Gateways to other regions
       gateways: [
         {
-          name: ashburn
+          name: falkenstein
           urls: [
-            "nats://nats-gateway.batchsender-us.com:7222"
+            "nats://nats-gateway.batchsender.com:7222"
           ]
         }
       ]
