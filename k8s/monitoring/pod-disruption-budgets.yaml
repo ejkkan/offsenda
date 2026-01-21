@@ -24,15 +24,3 @@ spec:
     matchLabels:
       app: grafana
 
----
-# NATS PDB remains in batchsender namespace where NATS is deployed
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: nats-pdb
-  namespace: batchsender
-spec:
-  minAvailable: 2
-  selector:
-    matchLabels:
-      app: nats

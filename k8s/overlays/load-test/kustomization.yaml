@@ -1,0 +1,238 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../base
+
+# Image tags - same as production, updated by CI pipeline
+images:
+- name: registry.localhost:5000/worker
+  newName: ghcr.io/ejkkan/offsenda-worker
+  newTag: main-3a722e5
+- name: registry.localhost:5000/web
+  newName: ghcr.io/ejkkan/offsenda-web
+  newTag: main-e2426ec
+- name: registry.localhost:5000/migration
+  newName: ghcr.io/ejkkan/offsenda-migration
+  newTag: main-3a722e5
+
+patches:
+# Exclude in-cluster PostgreSQL - using external database via DATABASE_URL
+- patch: |-
+    $patch: delete
+    apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: postgres
+      namespace: batchsender
+  target:
+    kind: StatefulSet
+    name: postgres
+- patch: |-
+    $patch: delete
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: postgres
+      namespace: batchsender
+  target:
+    kind: Service
+    name: postgres
+- patch: |-
+    $patch: delete
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: postgres-init
+      namespace: batchsender
+  target:
+    kind: ConfigMap
+    name: postgres-init
+
+# ============================================================
+# Worker Configuration for Load Testing
+# ============================================================
+- patch: |-
+    - op: replace
+      path: /data/EMAIL_PROVIDER
+      value: mock
+    - op: replace
+      path: /data/NODE_ENV
+      value: load-test
+    - op: replace
+      path: /data/NATS_TLS_ENABLED
+      value: "true"
+    - op: replace
+      path: /data/NATS_CLUSTER
+      value: "tls://nats.batchsender.svc:4222"
+    - op: replace
+      path: /data/WORKER_CONCURRENCY
+      value: "50"
+    - op: replace
+      path: /data/LOG_LEVEL
+      value: "warn"
+  target:
+    kind: ConfigMap
+    name: worker-config
+
+# ============================================================
+# Resource Patches for High-Throughput Load Testing
+# CCX43: 16 vCPU, 64GB RAM, 360GB NVMe
+# ============================================================
+
+# Worker - high throughput configuration (10-50 pods)
+- patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: 500m
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: 512Mi
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: "2"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: 1Gi
+  target:
+    kind: Deployment
+    name: worker
+
+# NATS - 3-node cluster (4Gi each = 12Gi total)
+- patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 3
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: "2"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: 4Gi
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: "4"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: 8Gi
+  target:
+    kind: StatefulSet
+    name: nats
+
+# NATS HPA - higher max for load testing
+- patch: |-
+    - op: replace
+      path: /spec/minReplicas
+      value: 3
+    - op: replace
+      path: /spec/maxReplicas
+      value: 5
+  target:
+    kind: HorizontalPodAutoscaler
+    name: nats-hpa
+
+# NATS PDB - maintain quorum
+- patch: |-
+    - op: replace
+      path: /spec/minAvailable
+      value: 2
+  target:
+    kind: PodDisruptionBudget
+    name: nats-pdb
+
+# Dragonfly - 3-node for high ops/sec (4Gi each = 12Gi total)
+- patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 3
+    - op: replace
+      path: /spec/resources/requests/cpu
+      value: "2"
+    - op: replace
+      path: /spec/resources/requests/memory
+      value: 4Gi
+    - op: replace
+      path: /spec/resources/limits/cpu
+      value: "4"
+    - op: replace
+      path: /spec/resources/limits/memory
+      value: 8Gi
+    - op: replace
+      path: /spec/args/1
+      value: "6gb"
+  target:
+    kind: Dragonfly
+    name: dragonfly
+
+# ClickHouse - single node with more resources
+- patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 1
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: "2"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: 4Gi
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: "4"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: 8Gi
+  target:
+    kind: StatefulSet
+    name: clickhouse
+
+# Web - single replica is sufficient
+- patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 1
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/cpu
+      value: 100m
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: 256Mi
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/cpu
+      value: 500m
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: 512Mi
+  target:
+    kind: Deployment
+    name: web
+
+# ============================================================
+# KEDA ScaledObject - Aggressive Scaling
+# ============================================================
+- patch: |-
+    - op: replace
+      path: /spec/minReplicaCount
+      value: 5
+    - op: replace
+      path: /spec/maxReplicaCount
+      value: 50
+    - op: replace
+      path: /spec/pollingInterval
+      value: 1
+    - op: replace
+      path: /spec/cooldownPeriod
+      value: 10
+    - op: replace
+      path: /spec/triggers/0/metadata/threshold
+      value: "500"
+    - op: replace
+      path: /spec/triggers/0/metadata/activationThreshold
+      value: "100"
+  target:
+    kind: ScaledObject
+    name: worker-scaler
+
+# Load test labels
+labels:
+- pairs:
+    environment: load-test
