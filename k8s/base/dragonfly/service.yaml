@@ -10,8 +10,7 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/name: dragonfly
-    app.kubernetes.io/instance: dragonfly
+    app: dragonfly
   ports:
   - port: 6379
     targetPort: 6379
