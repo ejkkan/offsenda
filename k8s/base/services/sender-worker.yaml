@@ -32,7 +32,7 @@ spec:
         env:
         - name: PORT
           value: "6001"
-        - name: MAX_CONCURRENT_EMAILS
+        - name: MAX_CONCURRENT_REQUESTS
           value: "1000"
         resources:
           requests:

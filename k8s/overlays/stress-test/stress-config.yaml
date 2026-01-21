@@ -1,0 +1,56 @@
+# Stress Test Configuration
+#
+# Target: 50k requests/second with realistic latency (~500ms)
+# Strategy: 10 workers × 5000 concurrent = 50,000 concurrent connections
+#           50,000 / 0.5s = 100,000 theoretical max (with headroom)
+#
+# Usage:
+#   kubectl apply -k k8s/overlays/stress-test
+#
+# Monitor:
+#   - Grafana dashboard for throughput, latency, error rates
+#   - kubectl top pods -n batchsender
+#   - NATS metrics for queue depth
+#
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stress-test-config
+  namespace: batchsender
+data:
+  # =============================================================================
+  # Concurrency (per worker)
+  # =============================================================================
+  MAX_CONCURRENT_REQUESTS: "5000"     # 5k concurrent per worker
+  CONCURRENT_BATCHES: "500"           # Process many batches in parallel
+  BATCH_SIZE: "500"                   # Larger batches
+
+  # =============================================================================
+  # Rate Limiting
+  # =============================================================================
+  HIGH_THROUGHPUT_TEST_MODE: "true"   # Skip per-request rate checks
+  MANAGED_MOCK_RATE_LIMIT: "100000"   # 100k/s system limit
+  SYSTEM_RATE_LIMIT: "100000"         # Match
+  RATE_LIMIT_PER_SECOND: "10000"      # Per-user limit
+
+  # =============================================================================
+  # Mock Provider (realistic latency)
+  # =============================================================================
+  EMAIL_PROVIDER: "mock"
+  MOCK_MODE: "success"
+  MOCK_LATENCY_MS: "500"              # Realistic 500ms latency
+  MOCK_FAILURE_RATE: "0.01"           # 1% failure rate
+
+  # =============================================================================
+  # Buffering (handle burst writes)
+  # =============================================================================
+  CLICKHOUSE_BUFFER_SIZE: "50000"     # 5x normal
+  CLICKHOUSE_FLUSH_INTERVAL_MS: "2000"
+  POSTGRES_SYNC_BATCH_SIZE: "5000"    # 5x normal
+  POSTGRES_SYNC_INTERVAL_MS: "1000"   # Faster sync
+
+  # =============================================================================
+  # Webhooks (if testing full flow)
+  # =============================================================================
+  WEBHOOK_BATCH_SIZE: "500"
+  WEBHOOK_MAX_WORKERS: "50"

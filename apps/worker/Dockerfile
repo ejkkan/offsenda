@@ -8,12 +8,15 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/worker/package.json ./apps/worker/
 COPY packages/db/package.json ./packages/db/
+COPY packages/config/package.json ./packages/config/
 
 RUN pnpm install --frozen-lockfile
 
 COPY packages/db ./packages/db
+COPY packages/config ./packages/config
 COPY apps/worker ./apps/worker
 
+RUN pnpm --filter=@batchsender/config build
 RUN pnpm --filter=@batchsender/db build
 RUN pnpm --filter=worker build
 
@@ -34,6 +37,9 @@ COPY --from=builder /app/apps/worker/dist ./apps/worker/dist
 
 COPY --from=builder /app/packages/db/package.json ./packages/db/
 COPY --from=builder /app/packages/db/dist ./packages/db/dist
+
+COPY --from=builder /app/packages/config/package.json ./packages/config/
+COPY --from=builder /app/packages/config/dist ./packages/config/dist
 
 RUN pnpm install --frozen-lockfile --prod
 

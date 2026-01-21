@@ -6,6 +6,7 @@ on:
     paths:
       - 'apps/worker/**'
       - 'packages/db/**'
+      - 'packages/config/**'
       - '.github/workflows/deploy-production.yml'
   workflow_dispatch:
 

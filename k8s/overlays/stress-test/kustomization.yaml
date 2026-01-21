@@ -1,0 +1,52 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# Patch sender-worker for extreme load testing
+patches:
+  - target:
+      kind: Deployment
+      name: sender-worker
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 10
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: PORT
+            value: "6001"
+          - name: MAX_CONCURRENT_REQUESTS
+            value: "5000"
+          - name: CONCURRENT_BATCHES
+            value: "500"
+          - name: HIGH_THROUGHPUT_TEST_MODE
+            value: "true"
+          - name: MOCK_LATENCY_MS
+            value: "500"
+          - name: MANAGED_MOCK_RATE_LIMIT
+            value: "100000"
+          - name: EMAIL_PROVIDER
+            value: "mock"
+          - name: MOCK_MODE
+            value: "success"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "500m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "2000m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "1Gi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "4Gi"
+
+# Images - will be updated by CI
+images:
+  - name: ghcr.io/ejkkan/offsenda-worker
+    newName: ghcr.io/ejkkan/offsenda-worker
+    newTag: latest

@@ -83,7 +83,7 @@ export class NatsEmailWorker {
       const inFlight = new Set<Promise<void>>();
 
       // Backpressure limit to prevent memory exhaustion
-      const maxInFlight = config.MAX_CONCURRENT_EMAILS || 1000;
+      const maxInFlight = config.MAX_CONCURRENT_REQUESTS || 1000;
 
       for await (const msg of messages) {
         if (this.isShuttingDown) break;

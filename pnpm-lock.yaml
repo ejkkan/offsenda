@@ -103,6 +103,9 @@ importers:
       '@aws-sdk/client-sesv2':
         specifier: ^3.500.0
         version: 3.967.0
+      '@batchsender/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       '@batchsender/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -164,6 +167,19 @@ importers:
       vitest:
         specifier: ^1.0.0
         version: 1.6.1(@types/node@20.19.28)
+
+  packages/config:
+    dependencies:
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.5
+        version: 20.19.28
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
 
   packages/db:
     dependencies:
@@ -4242,7 +4258,7 @@ snapshots:
 
   '@types/pg@8.16.0':
     dependencies:
-      '@types/node': 22.19.7
+      '@types/node': 20.19.28
       pg-protocol: 1.11.0
       pg-types: 2.2.0
 

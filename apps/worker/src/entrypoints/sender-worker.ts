@@ -111,11 +111,11 @@ async function start() {
   log.system.info({
     service: "sender-worker",
     port: config.PORT,
-    maxConcurrentEmails: config.MAX_CONCURRENT_EMAILS,
+    maxConcurrentRequests: config.MAX_CONCURRENT_REQUESTS,
   }, "sender-worker started");
 
   printBanner("Sender Worker", {
-    "Max Concurrent": config.MAX_CONCURRENT_EMAILS,
+    "Max Concurrent": config.MAX_CONCURRENT_REQUESTS,
     "Provider": config.EMAIL_PROVIDER,
     "NATS": config.NATS_CLUSTER,
   });
