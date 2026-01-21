@@ -1,0 +1,21 @@
+# ServiceMonitor for NATS Prometheus Exporter
+# Tells Prometheus to scrape metrics from the NATS exporter
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nats-exporter
+  namespace: monitoring
+  labels:
+    app: nats-exporter
+spec:
+  selector:
+    matchLabels:
+      app: nats-exporter
+  namespaceSelector:
+    matchNames:
+      - monitoring
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
