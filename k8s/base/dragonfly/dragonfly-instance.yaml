@@ -1,6 +1,4 @@
-# Install operator first:
-# kubectl apply -f https://raw.githubusercontent.com/dragonflydb/dragonfly-operator/main/manifests/dragonfly-operator.yaml
-
+# Dragonfly instance - operator is installed via dragonfly-operator-install.yaml
 apiVersion: dragonflydb.io/v1alpha1
 kind: Dragonfly
 metadata:

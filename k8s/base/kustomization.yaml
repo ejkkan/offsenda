@@ -12,8 +12,9 @@ resources:
   - postgres/statefulset.yaml
   - postgres/service.yaml
   - postgres/init-configmap.yaml
-  # DragonflyDB - For distributed rate limiting (uses operator)
-  - dragonfly/operator.yaml
+  # DragonflyDB - For distributed rate limiting
+  # NOTE: Requires dragonfly-operator to be installed first (k8s/operators/dragonfly)
+  - dragonfly/dragonfly-instance.yaml
   - dragonfly/service.yaml
   - dragonfly/networkpolicy.yaml
   # NATS - Message queue with TLS

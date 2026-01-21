@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Dragonfly Operator - installs CRDs, RBAC, and controller
+# Deploy this BEFORE the main batchsender app
+# ArgoCD: Create a separate Application for this with sync-wave: -1
+
+resources:
+  - dragonfly-operator-install.yaml
