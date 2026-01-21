@@ -4,13 +4,18 @@ import { z } from "zod";
 import { batches, recipients, users, apiKeys, sendConfigs } from "@batchsender/db";
 import type { EmailModuleConfig, WebhookModuleConfig } from "@batchsender/db";
 import { db } from "./db.js";
-import { queueService, natsClient } from "./index.js";
 import { getBatchStats, getUserDailyStats } from "./clickhouse.js";
 import { collectNatsMetrics } from "./nats/monitoring.js";
 import { getModule, hasModule } from "./modules/index.js";
 import { LIMITS } from "./limits.js";
 import crypto from "crypto";
 import { log, generateTraceId, withTraceAsync, getTraceId } from "./logger.js";
+import type { NatsClient } from "./nats/client.js";
+import type { NatsQueueService } from "./nats/queue-service.js";
+
+// Module-level references (set by registerApi)
+let queueService: NatsQueueService;
+let natsClient: NatsClient;
 
 // Simple API key auth
 async function verifyApiKey(
@@ -65,7 +70,20 @@ function maskSensitiveConfig(config: unknown): unknown {
   return masked;
 }
 
-export async function registerApi(app: FastifyInstance): Promise<void> {
+export interface ApiDependencies {
+  queueService: NatsQueueService;
+  natsClient: NatsClient;
+}
+
+export async function registerApi(
+  app: FastifyInstance,
+  deps?: ApiDependencies
+): Promise<void> {
+  // Set module-level references if provided
+  if (deps) {
+    queueService = deps.queueService;
+    natsClient = deps.natsClient;
+  }
   // Trace context middleware - extract or generate traceId for each request
   app.addHook("onRequest", async (request, reply) => {
     // Check for X-Trace-Id header (allows external systems to pass trace)

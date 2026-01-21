@@ -8,7 +8,20 @@ import { config } from "./config.js";
 import { logEmailEvent, lookupByProviderMessageId, type EmailEventType } from "./clickhouse.js";
 import { log } from "./logger.js";
 import { getNatsHealth } from "./nats/monitoring.js";
-import { natsClient, queueService, rateLimiterService } from "./index.js";
+import type { NatsClient } from "./nats/client.js";
+import type { NatsQueueService } from "./nats/queue-service.js";
+import type { RateLimiterService } from "./api-rate-limiter.js";
+
+// Module-level references set by registerWebhooks
+let natsClient: NatsClient;
+let queueService: NatsQueueService;
+let rateLimiterService: RateLimiterService;
+
+export interface WebhookDependencies {
+  natsClient: NatsClient;
+  queueService: NatsQueueService;
+  rateLimiterService: RateLimiterService;
+}
 
 // =============================================================================
 // Resend Types
@@ -99,7 +112,17 @@ function verifySignature(
   }
 }
 
-export async function registerWebhooks(app: FastifyInstance): Promise<void> {
+export async function registerWebhooks(
+  app: FastifyInstance,
+  deps?: WebhookDependencies
+): Promise<void> {
+  // Set module-level references if deps provided
+  if (deps) {
+    natsClient = deps.natsClient;
+    queueService = deps.queueService;
+    rateLimiterService = deps.rateLimiterService;
+  }
+
   // Resend webhook endpoint
   app.post("/webhooks/resend", {
     config: {

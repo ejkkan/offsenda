@@ -202,7 +202,7 @@ try {
 
   // Register routes after NATS initialization
   registerWebhookRoutes(app, webhookQueueProcessor);
-  await registerApi(app);
+  await registerApi(app, { queueService, natsClient });
   await registerTestSetupApi(app);
   await registerWebhookSimulator(app);
   await registerWebhookSimulatorRoutes(app, natsClient);

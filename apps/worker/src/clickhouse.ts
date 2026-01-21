@@ -3,40 +3,18 @@ import { config } from "./config.js";
 import { log } from "./logger.js";
 import { clickhouseWriteFailuresTotal } from "./metrics.js";
 
+// Import from shared types - single source of truth
+import type { EventType, EmailEventType, EmailEvent, ModuleType } from "./types/events.js";
+
+// Re-export for backwards compatibility
+export type { EventType, EmailEventType, EmailEvent, ModuleType };
+
 export const clickhouse = createClient({
   url: config.CLICKHOUSE_URL,
   username: config.CLICKHOUSE_USER,
   password: config.CLICKHOUSE_PASSWORD,
   database: config.CLICKHOUSE_DATABASE,
 });
-
-export type EventType =
-  | "queued"
-  | "sent"
-  | "delivered"
-  | "opened"
-  | "clicked"
-  | "bounced"
-  | "soft_bounced"
-  | "complained"
-  | "failed";
-
-export type ModuleType = "email" | "webhook" | "push" | "sms";
-
-// Legacy alias
-export type EmailEventType = EventType;
-
-export interface EmailEvent {
-  event_type: EventType;
-  module_type?: ModuleType;
-  batch_id: string;
-  recipient_id: string;
-  user_id: string;
-  email: string;
-  provider_message_id?: string;
-  metadata?: Record<string, unknown>;
-  error_message?: string;
-}
 
 export async function logEmailEvent(event: EmailEvent): Promise<void> {
   try {
