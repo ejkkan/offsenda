@@ -1,0 +1,26 @@
+# App-of-Apps: This single Application manages all other ArgoCD Applications
+# Apply this ONCE: kubectl apply -f k8s/argocd/root-app.yaml
+# After that, any new apps added to k8s/argocd/ will be auto-deployed
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ejkkan/offsenda
+    targetRevision: main
+    path: k8s/argocd
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
