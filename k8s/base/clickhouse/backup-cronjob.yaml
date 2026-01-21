@@ -110,17 +110,17 @@ spec:
               echo "=== Backup job complete ==="
 
             env:
-            # B2 credentials from secret
+            # B2 credentials from sealed secret
             - name: B2_KEY_ID
               valueFrom:
                 secretKeyRef:
-                  name: clickhouse-b2-credentials
-                  key: key-id
+                  name: clickhouse-b2-secret
+                  key: B2_KEY_ID
             - name: B2_APP_KEY
               valueFrom:
                 secretKeyRef:
-                  name: clickhouse-b2-credentials
-                  key: app-key
+                  name: clickhouse-b2-secret
+                  key: B2_APP_KEY
 
             # Resource limits
             resources:
