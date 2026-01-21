@@ -62,7 +62,7 @@ masters_pool:
 worker_node_pools:
   # Main worker pool with autoscaling
   - name: workers
-    instance_type: cpx22       # 2 vCPU, 4GB RAM, €6.99/mo each
+    instance_type: cpx31       # 4 vCPU, 8GB RAM, €14.99/mo each (upgraded from cpx22)
     instance_count: 1          # Starts with 1 worker
     location: fsn1             # Falkenstein (can add more locations later)
     image: ubuntu-24.04
