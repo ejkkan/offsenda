@@ -27,7 +27,9 @@ data:
     )
     ENGINE = MergeTree()
     PARTITION BY toYYYYMM(event_date)
-    ORDER BY (batch_id, recipient_id, event_type);
+    ORDER BY (batch_id, recipient_id, event_type)
+    SETTINGS storage_policy = 'tiered'
+    TTL event_date + INTERVAL 30 DAY TO VOLUME 'cold';
 
     -- Message index for webhook lookups
     CREATE TABLE IF NOT EXISTS batchsender.email_message_index
