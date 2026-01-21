@@ -40,29 +40,8 @@ data:
       ]
     }
 
-    # Gateway connections (cross-region communication)
-    gateway {
-      name: falkenstein
-      port: 7222
-
-      tls {
-        cert_file: /etc/nats-certs/tls.crt
-        key_file: /etc/nats-certs/tls.key
-        ca_file: /etc/nats-certs/ca.crt
-        verify: true
-        timeout: 5
-      }
-
-      # Gateways to other regions
-      gateways: [
-        {
-          name: ashburn
-          urls: [
-            "nats://nats-gateway.batchsender-us.com:7222"
-          ]
-        }
-      ]
-    }
+    # Gateway connections (cross-region) - disabled until Ashburn is deployed
+    # Re-enable when setting up multi-region
 
     # JetStream storage
     jetstream {
