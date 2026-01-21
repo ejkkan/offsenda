@@ -106,6 +106,7 @@ const envSchema = z.object({
   // Admin endpoints for automated testing (k6, integration tests)
   TEST_ADMIN_SECRET: z.string().default("test-admin-secret"),
   ENABLE_TEST_SETUP_API: z.string().optional(), // Set to "true" to enable in production
+  ENABLE_WEBHOOK_SIMULATOR: z.string().optional(), // Set to "true" to enable webhook simulator in production
 
   // =============================================================================
   // Batch Recovery Service

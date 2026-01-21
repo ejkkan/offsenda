@@ -14,16 +14,33 @@ import { batches, recipients, sendConfigs } from "@batchsender/db";
 
 /**
  * Register webhook simulator routes
- * Only available in non-production environments
+ * Available in non-production, or in production with explicit opt-in
  */
 export async function registerWebhookSimulatorRoutes(
   app: FastifyInstance,
   natsClient: NatsClient
 ): Promise<void> {
-  // Only enable in non-production
-  if (config.NODE_ENV === "production") {
-    log.system.info("Webhook simulator routes disabled in production");
+  const IS_PRODUCTION = config.NODE_ENV === "production";
+  const ENABLE_IN_PROD = process.env.ENABLE_WEBHOOK_SIMULATOR === "true";
+
+  // Only enable in non-production, or production with explicit opt-in
+  if (IS_PRODUCTION && !ENABLE_IN_PROD) {
+    log.system.info("Webhook simulator routes disabled in production (set ENABLE_WEBHOOK_SIMULATOR=true to enable)");
     return;
+  }
+
+  // In production, require admin secret for all simulator routes
+  if (IS_PRODUCTION) {
+    app.addHook("preHandler", async (request, reply) => {
+      if (!request.url.startsWith("/test/simulate")) {
+        return;
+      }
+      const secret = request.headers["x-admin-secret"];
+      if (secret !== config.TEST_ADMIN_SECRET) {
+        return reply.status(401).send({ error: "Invalid admin secret" });
+      }
+    });
+    log.system.warn({}, "Webhook simulator enabled in PRODUCTION - protected by admin secret");
   }
 
   // Initialize simulator
