@@ -170,6 +170,10 @@ export const configSchema = z.object({
   ENABLE_TEST_SETUP_API: z.string().optional(),
   ENABLE_WEBHOOK_SIMULATOR: z.string().optional(),
   HIGH_THROUGHPUT_TEST_MODE: stringBoolean.default(false),
+  /** Minimum simulated latency for dry run mode (ms) */
+  DRY_RUN_LATENCY_MIN_MS: z.coerce.number().default(50),
+  /** Maximum simulated latency for dry run mode (ms) */
+  DRY_RUN_LATENCY_MAX_MS: z.coerce.number().default(500),
 });
 
 // =============================================================================

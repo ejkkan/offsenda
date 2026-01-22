@@ -137,23 +137,27 @@ spec:
               mountPath: /loki
           resources:
             requests:
-              memory: "256Mi"
+              memory: "512Mi"
               cpu: "100m"
             limits:
-              memory: "1Gi"
-              cpu: "500m"
+              memory: "2Gi"
+              cpu: "1"
           readinessProbe:
             httpGet:
               path: /ready
               port: http
-            initialDelaySeconds: 15
+            initialDelaySeconds: 45
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /ready
               port: http
-            initialDelaySeconds: 30
-            periodSeconds: 15
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
       volumes:
         - name: config
           configMap:

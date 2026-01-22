@@ -38,4 +38,11 @@ data:
   # Audit Logging
   AUDIT_ENABLED: "true"
   AUDIT_LOG_TO_CONSOLE: "false"
-# Updated Fri Jan 17 2026
+
+  # Test Setup API (for load testing)
+  ENABLE_TEST_SETUP_API: "true"
+
+  # Dry run latency simulation (realistic provider behavior)
+  DRY_RUN_LATENCY_MIN_MS: "50"
+  DRY_RUN_LATENCY_MAX_MS: "500"
+# Updated Wed Jan 22 2026

@@ -435,8 +435,12 @@ export class NatsEmailWorker {
       let result: JobResult;
 
       if (dryRun) {
-        // Use minimal latency in high-throughput test mode, otherwise simulate realistic delays
-        const simulatedLatency = config.HIGH_THROUGHPUT_TEST_MODE ? 1 : (20 + Math.random() * 80);
+        // Use minimal latency in high-throughput test mode, otherwise simulate realistic provider delays
+        const minLatency = config.DRY_RUN_LATENCY_MIN_MS;
+        const maxLatency = config.DRY_RUN_LATENCY_MAX_MS;
+        const simulatedLatency = config.HIGH_THROUGHPUT_TEST_MODE
+          ? 1
+          : minLatency + Math.random() * (maxLatency - minLatency);
         if (simulatedLatency > 1) {
           await new Promise((resolve) => setTimeout(resolve, simulatedLatency));
         }
