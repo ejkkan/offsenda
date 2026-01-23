@@ -22,8 +22,7 @@ spec:
   args:
     - "--maxmemory"
     - "10gb"
-    - "--maxmemory-policy"
-    - "noeviction"  # CRITICAL: Never evict batch data - prevents duplicate sends
+    # No --cache_mode = noeviction (default). CRITICAL: Never evict batch data
     - "--snapshot_cron"
     - "*/5 * * * *"  # Snapshot every 5 minutes for crash recovery
     - "--dir"
