@@ -173,7 +173,7 @@ data:
           "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
           "targets": [{
             "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-            "expr": "gnatsd_varz_connections",
+            "expr": "sum(gnatsd_varz_connections)",
             "refId": "A"
           }],
           "title": "NATS Connections",
@@ -204,13 +204,13 @@ data:
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-              "expr": "rate(gnatsd_varz_in_msgs[1m])",
+              "expr": "sum(rate(gnatsd_varz_in_msgs[1m]))",
               "legendFormat": "Messages In/sec",
               "refId": "A"
             },
             {
               "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-              "expr": "rate(gnatsd_varz_out_msgs[1m])",
+              "expr": "sum(rate(gnatsd_varz_out_msgs[1m]))",
               "legendFormat": "Messages Out/sec",
               "refId": "B"
             }
@@ -235,13 +235,13 @@ data:
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-              "expr": "rate(gnatsd_varz_in_bytes[1m])",
+              "expr": "sum(rate(gnatsd_varz_in_bytes[1m]))",
               "legendFormat": "Bytes In/sec",
               "refId": "A"
             },
             {
               "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-              "expr": "rate(gnatsd_varz_out_bytes[1m])",
+              "expr": "sum(rate(gnatsd_varz_out_bytes[1m]))",
               "legendFormat": "Bytes Out/sec",
               "refId": "B"
             }
@@ -266,13 +266,13 @@ data:
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-              "expr": "gnatsd_varz_jetstream_stats_storage",
+              "expr": "sum(gnatsd_varz_jetstream_stats_storage)",
               "legendFormat": "Storage Used",
               "refId": "A"
             },
             {
               "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-              "expr": "gnatsd_varz_jetstream_stats_memory",
+              "expr": "sum(gnatsd_varz_jetstream_stats_memory)",
               "legendFormat": "Memory Used",
               "refId": "B"
             }
@@ -295,7 +295,7 @@ data:
           "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
           "targets": [{
             "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-            "expr": "gnatsd_varz_jetstream_config_max_storage",
+            "expr": "max(gnatsd_varz_jetstream_config_max_storage)",
             "refId": "A"
           }],
           "title": "Max Storage",
@@ -316,7 +316,7 @@ data:
           "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
           "targets": [{
             "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-            "expr": "gnatsd_varz_jetstream_config_max_memory",
+            "expr": "max(gnatsd_varz_jetstream_config_max_memory)",
             "refId": "A"
           }],
           "title": "Max Memory",
@@ -339,19 +339,19 @@ data:
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-              "expr": "gnatsd_varz_connections",
+              "expr": "sum(gnatsd_varz_connections)",
               "legendFormat": "Client Connections",
               "refId": "A"
             },
             {
               "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-              "expr": "gnatsd_varz_routes",
+              "expr": "sum(gnatsd_varz_routes)",
               "legendFormat": "Cluster Routes",
               "refId": "B"
             },
             {
               "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-              "expr": "gnatsd_varz_subscriptions",
+              "expr": "sum(gnatsd_varz_subscriptions)",
               "legendFormat": "Subscriptions",
               "refId": "C"
             }
@@ -375,8 +375,8 @@ data:
           "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
           "targets": [{
             "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
-            "expr": "gnatsd_varz_cpu",
-            "legendFormat": "NATS CPU %",
+            "expr": "avg(gnatsd_varz_cpu)",
+            "legendFormat": "NATS CPU % (avg)",
             "refId": "A"
           }],
           "title": "NATS CPU Usage",

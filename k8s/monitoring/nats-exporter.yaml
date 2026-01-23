@@ -26,8 +26,10 @@ spec:
           - "-varz"
           - "-connz"
           - "-jsz=all"
-          # Cross-namespace reference: NATS runs in batchsender namespace
-          - "http://nats.batchsender:8222"
+          # Scrape all 3 NATS pods individually (headless service only routes to one)
+          - "http://nats-0.nats.batchsender.svc:8222"
+          - "http://nats-1.nats.batchsender.svc:8222"
+          - "http://nats-2.nats.batchsender.svc:8222"
         ports:
         - containerPort: 7777
           name: metrics
