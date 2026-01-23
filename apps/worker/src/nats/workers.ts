@@ -172,8 +172,6 @@ export class NatsEmailWorker {
       const { batchId, userId } = data;
       const timer = createTimer();
 
-      log.batch.info({ id: batchId, userId }, "processing");
-
       const batch = await db.query.batches.findFirst({
         where: eq(batches.id, batchId),
         with: { sendConfig: true },
@@ -183,6 +181,13 @@ export class NatsEmailWorker {
         log.batch.error({ id: batchId }, "not found");
         throw new Error(`Batch ${batchId} not found`);
       }
+
+      // Log with redelivery info (useful for debugging rolling update scenarios)
+      const redeliveryCount = msg.info.redeliveryCount;
+      log.batch.info(
+        { id: batchId, userId, redeliveryCount, currentStatus: batch.status },
+        redeliveryCount > 0 ? "processing (redelivery)" : "processing"
+      );
 
       if (batch.status === "paused") {
         log.batch.info({ id: batchId }, "skipped (paused)");
@@ -198,6 +203,9 @@ export class NatsEmailWorker {
           }
         : getDefaultEmailConfig();
 
+      // Detect if this is a redelivery (batch already in "processing" state)
+      const isRedelivery = batch.status === "processing";
+
       if (batch.status === "queued") {
         await db
           .update(batches)
@@ -205,9 +213,13 @@ export class NatsEmailWorker {
           .where(eq(batches.id, batchId));
       }
 
-      // Count pending recipients first for hot state initialization
-      // Uses COUNT query - doesn't load all recipients into memory
-      const pendingCount = await countRecipients(batchId, "pending");
+      // Count recipients that need processing
+      // On redelivery, include "queued" recipients that may not have been enqueued to NATS
+      // (worker may have died between marking "queued" and publishing to NATS)
+      const statusesToProcess: ("pending" | "queued")[] = isRedelivery
+        ? ["pending", "queued"]
+        : ["pending"];
+      const pendingCount = await countRecipients(batchId, statusesToProcess);
 
       if (pendingCount === 0) {
         // Check if batch should be marked complete
@@ -237,7 +249,7 @@ export class NatsEmailWorker {
       let currentChunkIds: string[] = [];
       const chunksToEnqueue: ChunkJobData[] = [];
 
-      for await (const page of streamRecipientPages(batchId, { pageSize: 1000, status: "pending" })) {
+      for await (const page of streamRecipientPages(batchId, { pageSize: 1000, status: statusesToProcess })) {
         pageCount++;
         const pageRecipients = page.recipients;
 

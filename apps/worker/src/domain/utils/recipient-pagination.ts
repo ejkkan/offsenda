@@ -35,8 +35,8 @@ export interface RecipientRow {
 export interface PaginationOptions {
   /** Number of recipients per page (default: 1000) */
   pageSize?: number;
-  /** Only fetch recipients with this status (default: 'pending') */
-  status?: RecipientStatus;
+  /** Only fetch recipients with this status or statuses (default: 'pending') */
+  status?: RecipientStatus | RecipientStatus[];
 }
 
 /**
@@ -65,18 +65,23 @@ export async function fetchRecipientPage(
   options: PaginationOptions = {}
 ): Promise<RecipientPage> {
   const pageSize = options.pageSize || DEFAULT_PAGE_SIZE;
-  const status = options.status || "pending";
+  const statusFilter = options.status || "pending";
+
+  // Build status condition (supports single status or array of statuses)
+  const statusCondition = Array.isArray(statusFilter)
+    ? inArray(recipients.status, statusFilter)
+    : eq(recipients.status, statusFilter);
 
   // Build where clause
   const whereConditions = cursor
     ? and(
         eq(recipients.batchId, batchId),
-        eq(recipients.status, status),
+        statusCondition,
         gt(recipients.id, cursor)
       )
     : and(
         eq(recipients.batchId, batchId),
-        eq(recipients.status, status)
+        statusCondition
       );
 
   // Fetch page + 1 to check if there are more
@@ -168,22 +173,27 @@ export async function* streamRecipients(
 }
 
 /**
- * Count total recipients for a batch with a specific status
+ * Count total recipients for a batch with a specific status or statuses
  *
  * Uses COUNT(*) query - doesn't load all records into memory
  * Useful for progress tracking and capacity planning
  */
 export async function countRecipients(
   batchId: string,
-  status: RecipientStatus = "pending"
+  status: RecipientStatus | RecipientStatus[] = "pending"
 ): Promise<number> {
+  // Build status condition (supports single status or array of statuses)
+  const statusCondition = Array.isArray(status)
+    ? inArray(recipients.status, status)
+    : eq(recipients.status, status);
+
   const result = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(recipients)
     .where(
       and(
         eq(recipients.batchId, batchId),
-        eq(recipients.status, status)
+        statusCondition
       )
     );
   return result[0]?.count ?? 0;

@@ -583,6 +583,10 @@ export class HotStateManager {
    * Initialize batch counters (called when batch processing starts).
    * Checks backpressure before accepting the batch.
    *
+   * IDEMPOTENT: If batch counters already exist (e.g., from a redelivered message
+   * after partial processing), they are NOT overwritten. This preserves progress
+   * during rolling updates and crash recovery scenarios.
+   *
    * @throws Error if memory pressure is too high (batch should be delayed)
    */
   async initializeBatch(batchId: string, totalRecipients: number): Promise<void> {
@@ -598,6 +602,22 @@ export class HotStateManager {
     const ttl = this.config.activeBatchTtlMs;
 
     try {
+      // Check if batch is already initialized (e.g., from a redelivered message)
+      const existingTotal = await this.redis.hget(countersKey, "total");
+
+      if (existingTotal !== null) {
+        // Batch already has hot state - don't overwrite (preserves progress on redelivery)
+        // Just refresh the TTL to keep it alive
+        await this.redis.pexpire(countersKey, ttl);
+        this.recordSuccess();
+        log.system.info(
+          { batchId, existingTotal, requestedTotal: totalRecipients },
+          "HotStateManager batch already initialized (redelivery), preserving state"
+        );
+        return;
+      }
+
+      // First time initialization - set counters
       await this.redis.pipeline()
         .hset(countersKey, {
           sent: "0",
