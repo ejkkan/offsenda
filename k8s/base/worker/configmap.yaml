@@ -11,7 +11,10 @@ data:
   NODE_ENV: "development"
 
   # Service URLs (use kubernetes service DNS)
+  # Split Dragonfly for isolation: critical (fail-closed) vs auxiliary (fail-open)
   DRAGONFLY_URL: "dragonfly.batchsender.svc:6379"
+  DRAGONFLY_CRITICAL_URL: "dragonfly-critical.batchsender.svc:6379"
+  DRAGONFLY_AUXILIARY_URL: "dragonfly-auxiliary.batchsender.svc:6379"
   NATS_CLUSTER: "nats://nats.batchsender.svc:4222"
   CLICKHOUSE_URL: "http://clickhouse.batchsender.svc:8123"
 
