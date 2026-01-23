@@ -87,7 +87,12 @@ app.addHook("onRequest", async (request, reply) => {
   }
 
   // 3. Distributed rate limiting (Dragonfly)
-  if (!config.DISABLE_RATE_LIMIT) {
+  // Skip rate limiting for test-setup routes and requests with valid admin secret
+  const isTestSetupRoute = request.url.startsWith("/api/test-setup");
+  const hasAdminSecret = request.headers["x-admin-secret"] === config.TEST_ADMIN_SECRET;
+  const skipRateLimit = isTestSetupRoute || hasAdminSecret;
+
+  if (!config.DISABLE_RATE_LIMIT && !skipRateLimit) {
     const clientIp = request.ip;
     const result = await rateLimiterService.checkLimit(clientIp);
 

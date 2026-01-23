@@ -503,23 +503,31 @@ export async function registerApi(
         });
       }
 
-      // Check 3: Active batches
-      const [activeBatchCount] = await db
-        .select({ count: count() })
-        .from(batches)
-        .where(
-          and(
-            eq(batches.userId, userId),
-            inArray(batches.status, ["draft", "scheduled", "queued", "processing"])
-          )
-        );
+      // Check 3: Active batches (skip for test users to allow load testing)
+      const user = await db.query.users.findFirst({
+        where: eq(users.id, userId),
+        columns: { email: true },
+      });
+      const isTestUser = user?.email?.endsWith("@test.batchsender.com") ?? false;
 
-      if (Number(activeBatchCount?.count || 0) >= LIMITS.maxActiveBatchesPerUser) {
-        return reply.status(429).send({
-          error: `Too many active batches.`,
-          limit: LIMITS.maxActiveBatchesPerUser,
-          suggestion: `Wait for some batches to complete or cancel unused drafts.`,
-        });
+      if (!isTestUser) {
+        const [activeBatchCount] = await db
+          .select({ count: count() })
+          .from(batches)
+          .where(
+            and(
+              eq(batches.userId, userId),
+              inArray(batches.status, ["draft", "scheduled", "queued", "processing"])
+            )
+          );
+
+        if (Number(activeBatchCount?.count || 0) >= LIMITS.maxActiveBatchesPerUser) {
+          return reply.status(429).send({
+            error: `Too many active batches.`,
+            limit: LIMITS.maxActiveBatchesPerUser,
+            suggestion: `Wait for some batches to complete or cancel unused drafts.`,
+          });
+        }
       }
 
       // ═══════════════════════════════════════════════════════════════════════

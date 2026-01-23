@@ -103,7 +103,11 @@ export class TestClient {
   // ===========================================================================
 
   _headers(includeAuth = true) {
-    const headers = { 'Content-Type': 'application/json' };
+    const headers = {
+      'Content-Type': 'application/json',
+      // Include admin secret to bypass rate limits during load testing
+      'X-Admin-Secret': ADMIN_SECRET,
+    };
     if (includeAuth && this.apiKey) {
       headers['Authorization'] = `Bearer ${this.apiKey}`;
     }
