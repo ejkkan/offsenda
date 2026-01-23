@@ -603,6 +603,8 @@ metadata:
   namespace: monitoring
 spec:
   replicas: 1
+  strategy:
+    type: Recreate  # Required for ReadWriteOnce PVC - can't have 2 pods trying to mount same volume
   selector:
     matchLabels:
       app: grafana
