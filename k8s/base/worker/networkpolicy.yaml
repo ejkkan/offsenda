@@ -37,11 +37,29 @@ spec:
     - protocol: TCP
       port: 8123
 
-  # To Dragonfly
+  # To Dragonfly (legacy - single instance)
   - to:
     - podSelector:
         matchLabels:
           app: dragonfly
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # To Dragonfly Critical (batch state, recipient status - fail-closed)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: dragonfly-critical
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # To Dragonfly Auxiliary (rate limiting, caching - fail-open)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: dragonfly-auxiliary
     ports:
     - protocol: TCP
       port: 6379
