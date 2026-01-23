@@ -603,10 +603,12 @@ export class HotStateManager {
 
     try {
       // Check if batch is already initialized (e.g., from a redelivered message)
+      // Must check for actual value, not just existence (null, undefined, or empty string all mean not initialized)
       const existingTotal = await this.redis.hget(countersKey, "total");
+      const hasValidTotal = existingTotal !== null && existingTotal !== undefined && existingTotal !== "";
 
-      if (existingTotal !== null) {
-        // Batch already has hot state - don't overwrite (preserves progress on redelivery)
+      if (hasValidTotal) {
+        // Batch already has hot state with valid total - don't overwrite (preserves progress on redelivery)
         // Just refresh the TTL to keep it alive
         await this.redis.pexpire(countersKey, ttl);
         this.recordSuccess();
@@ -617,8 +619,9 @@ export class HotStateManager {
         return;
       }
 
-      // First time initialization - set counters
-      await this.redis.pipeline()
+      // First time initialization OR recovery from corrupted state (missing total)
+      // Use HSET to set/overwrite all counters atomically
+      const result = await this.redis.pipeline()
         .hset(countersKey, {
           sent: "0",
           failed: "0",
@@ -626,6 +629,12 @@ export class HotStateManager {
         })
         .pexpire(countersKey, ttl)
         .exec();
+
+      // Verify pipeline succeeded
+      if (!result || result.some(r => r[0] !== null)) {
+        const errors = result?.filter(r => r[0] !== null).map(r => r[0]);
+        throw new Error(`Pipeline failed: ${JSON.stringify(errors)}`);
+      }
 
       this.recordSuccess();
       log.system.debug({ batchId, totalRecipients }, "HotStateManager batch initialized");
