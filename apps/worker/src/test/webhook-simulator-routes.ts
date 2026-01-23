@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { randomUUID } from "crypto";
+import { eq } from "drizzle-orm";
 import { config } from "../config.js";
 import { log } from "../logger.js";
 import {
@@ -181,7 +182,7 @@ export async function registerWebhookSimulatorRoutes(
     try {
       // Get or create a send config for the user
       let sendConfig = await db.query.sendConfigs.findFirst({
-        where: (sc, { eq }) => eq(sc.userId, userId),
+        where: eq(sendConfigs.userId, userId),
       });
 
       if (!sendConfig) {

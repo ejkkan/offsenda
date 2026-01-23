@@ -1,0 +1,39 @@
+# Dragonfly Critical Instance
+# Used for HotStateManager (batch state, recipient status)
+# FAIL-CLOSED: Operations fail rather than risk duplicate sends
+# NO EVICTION: Data must never be evicted to prevent duplicate sends
+# PERSISTENCE: Snapshots every 5 min to survive restarts
+apiVersion: dragonflydb.io/v1alpha1
+kind: Dragonfly
+metadata:
+  name: dragonfly-critical
+  namespace: batchsender
+spec:
+  replicas: 3  # 1 master + 2 replicas, auto-failover
+  labels:
+    role: master  # Fix for operator bug - service selector requires this label
+  resources:
+    requests:
+      cpu: "1"
+      memory: 4Gi
+    limits:
+      cpu: "4"
+      memory: 12Gi
+  args:
+    - "--maxmemory"
+    - "10gb"
+    - "--maxmemory-policy"
+    - "noeviction"  # CRITICAL: Never evict batch data - prevents duplicate sends
+    - "--snapshot_cron"
+    - "*/5 * * * *"  # Snapshot every 5 minutes for crash recovery
+    - "--dir"
+    - "/data"  # Persistence directory (mounted from PVC)
+  # Persistent storage for snapshots - survives pod restarts
+  snapshot:
+    persistentVolumeClaimSpec:
+      accessModes:
+        - ReadWriteOnce
+      storageClassName: hcloud-volumes  # Hetzner Cloud block storage
+      resources:
+        requests:
+          storage: 20Gi  # ~2x maxmemory for snapshot headroom

@@ -1,0 +1,43 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dragonfly-critical-policy
+  namespace: batchsender
+spec:
+  podSelector:
+    matchLabels:
+      app: dragonfly-critical
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # From worker pods only (HotStateManager)
+    - from:
+        - podSelector:
+            matchLabels:
+              app: worker
+      ports:
+        - protocol: TCP
+          port: 6379
+
+  egress:
+    # DNS resolution only (Dragonfly doesn't need external access)
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Dragonfly replication between pods
+    - to:
+        - podSelector:
+            matchLabels:
+              app: dragonfly-critical
+      ports:
+        - protocol: TCP
+          port: 6379

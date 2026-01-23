@@ -1,15 +1,16 @@
 import { JsMsg, StringCodec } from "nats";
 import { eq, and, inArray } from "drizzle-orm";
 import { batches, recipients } from "@batchsender/db";
-import type { EmailModuleConfig, BatchPayload } from "@batchsender/db";
+import type { EmailModuleConfig, BatchPayload, Recipient } from "@batchsender/db";
 import { db } from "../db.js";
 import { config } from "../config.js";
 import { logEventBuffered, indexProviderMessageBuffered, getBufferedLogger } from "../buffered-logger.js";
 import { getHotStateManager } from "../hot-state-manager.js";
-import { BatchJobData, JobData, EmbeddedSendConfig, NatsQueueService } from "./queue-service.js";
+import { BatchJobData, ChunkJobData, JobData, EmbeddedSendConfig, NatsQueueService } from "./queue-service.js";
 import { NatsClient } from "./client.js";
 import { getModule } from "../modules/index.js";
-import type { JobPayload, JobResult } from "../modules/types.js";
+import type { JobPayload, JobResult, BatchJobPayload, PROVIDER_LIMITS } from "../modules/types.js";
+import { PROVIDER_LIMITS as ProviderLimits } from "../modules/types.js";
 import { buildJobPayload } from "../domain/payload-builders/index.js";
 import { log, createTimer, withTraceAsync } from "../logger.js";
 import { acquireRateLimit, closeRateLimitRegistry } from "../rate-limiting/index.js";
@@ -141,6 +142,14 @@ export class NatsEmailWorker {
       maxMessages: config.CONCURRENT_BATCHES || 10,
       onMessage: (msg) => this.processBatchMessage(msg),
       onError: async (msg, error) => {
+        // Handle backpressure (memory pressure) differently - delay longer to allow memory to free up
+        if (error.message?.includes("memory_pressure")) {
+          log.batch.warn({ error: error.message, seq: msg.seq }, "Batch delayed due to memory pressure");
+          // Retry in 60 seconds to allow memory pressure to subside
+          msg.nak(60000);
+          return;
+        }
+
         log.batch.error({ error, seq: msg.seq }, "Failed to process batch");
         msg.nak(calculateBatchBackoff(msg.info.redeliveryCount));
       },
@@ -214,11 +223,19 @@ export class NatsEmailWorker {
       const hotState = getHotStateManager();
       await hotState.initializeBatch(batchId, pendingCount);
 
+      // Determine chunk size from sendConfig or provider defaults
+      const providerLimits = ProviderLimits[embeddedConfig.module] || ProviderLimits.webhook;
+      const rateLimit = embeddedConfig.rateLimit as { recipientsPerRequest?: number } | null;
+      const chunkSize = rateLimit?.recipientsPerRequest || providerLimits.maxBatchSize;
+
       // Stream recipients in pages to avoid OOM for large batches
-      // Each page: update status, log events, enqueue jobs
+      // Each page: update status, log events, build chunks
       let totalEnqueued = 0;
       let totalFailed = 0;
       let pageCount = 0;
+      let chunkIndex = 0;
+      let currentChunkIds: string[] = [];
+      const chunksToEnqueue: ChunkJobData[] = [];
 
       for await (const page of streamRecipientPages(batchId, { pageSize: 1000, status: "pending" })) {
         pageCount++;
@@ -243,38 +260,56 @@ export class NatsEmailWorker {
         getBufferedLogger().logEvents(queuedEvents);
         clickhouseEventsTotal.inc({ event_type: "queued" }, queuedEvents.length);
 
-        // Create jobs for this page
-        // NOTE: Both `payload` (preferred) and legacy fields are included for backwards
-        // compatibility. The payload builder handles priority: payload > legacy > config.
-        // Legacy fields will be removed after database migration to payload-only storage.
-        const jobs: JobData[] = pageRecipients.map((r: RecipientRow) => ({
-          batchId,
-          recipientId: r.id,
-          userId,
-          identifier: r.identifier || r.email || "",
-          name: r.name || undefined,
-          variables: r.variables as Record<string, string> | undefined,
-          sendConfig: embeddedConfig,
-          payload: batch.payload as BatchPayload | undefined,
-          dryRun: batch.dryRun,
-          // Legacy fields - kept for backwards compatibility with existing batches
-          email: r.email || r.identifier || undefined,
-          fromEmail: batch.fromEmail || undefined,
-          fromName: batch.fromName || undefined,
-          subject: batch.subject || undefined,
-          htmlContent: batch.htmlContent || undefined,
-          textContent: batch.textContent || undefined,
-        }));
+        // Build chunks from this page
+        for (const r of pageRecipients) {
+          currentChunkIds.push(r.id);
 
-        // Enqueue this page
-        const enqueueResult = await this.queueService.enqueueEmails(userId, jobs);
-        totalEnqueued += enqueueResult.success;
-        totalFailed += enqueueResult.failed;
+          if (currentChunkIds.length >= chunkSize) {
+            chunksToEnqueue.push({
+              batchId,
+              userId,
+              chunkIndex,
+              recipientIds: currentChunkIds,
+              sendConfig: embeddedConfig,
+              dryRun: batch.dryRun,
+            });
+            chunkIndex++;
+            currentChunkIds = [];
+          }
+        }
+
+        // Enqueue chunks accumulated so far (to avoid holding too many in memory)
+        if (chunksToEnqueue.length >= 100) {
+          const enqueueResult = await this.queueService.enqueueRecipientChunks(chunksToEnqueue);
+          totalEnqueued += enqueueResult.success;
+          totalFailed += enqueueResult.failed;
+          chunksToEnqueue.length = 0;
+        }
 
         // Log progress for large batches
         if (pageCount % 10 === 0) {
-          log.batch.debug({ id: batchId, pages: pageCount, enqueued: totalEnqueued }, "pagination progress");
+          log.batch.debug({ id: batchId, pages: pageCount, chunks: chunkIndex }, "pagination progress");
         }
+      }
+
+      // Final chunk (partial)
+      if (currentChunkIds.length > 0) {
+        chunksToEnqueue.push({
+          batchId,
+          userId,
+          chunkIndex,
+          recipientIds: currentChunkIds,
+          sendConfig: embeddedConfig,
+          dryRun: batch.dryRun,
+        });
+        chunkIndex++;
+      }
+
+      // Enqueue remaining chunks
+      if (chunksToEnqueue.length > 0) {
+        const enqueueResult = await this.queueService.enqueueRecipientChunks(chunksToEnqueue);
+        totalEnqueued += enqueueResult.success;
+        totalFailed += enqueueResult.failed;
       }
 
       // Check total enqueue result and fail batch if too many dropped
@@ -299,7 +334,7 @@ export class NatsEmailWorker {
 
       await this.ensureUserEmailProcessor(userId);
 
-      log.batch.info({ id: batchId, jobs: totalEnqueued, pages: pageCount, module: embeddedConfig.module, duration: timer() }, "enqueued (paginated)");
+      log.batch.info({ id: batchId, chunks: chunkIndex, chunkSize, pages: pageCount, module: embeddedConfig.module, duration: timer() }, "enqueued (chunked)");
     }, traceId);
   }
 
@@ -357,15 +392,22 @@ export class NatsEmailWorker {
   }
 
   private async processJobMessage(msg: JsMsg): Promise<void> {
-    let data: JobData;
+    let data: JobData | ChunkJobData;
     try {
-      data = JSON.parse(this.sc.decode(msg.data)) as JobData;
+      data = JSON.parse(this.sc.decode(msg.data)) as JobData | ChunkJobData;
     } catch (error) {
       log.email.error({ error, seq: msg.seq }, "Failed to parse job message");
       msg.ack();
       return;
     }
 
+    // Detect chunk vs individual job by checking for recipientIds array
+    if ("recipientIds" in data && Array.isArray((data as ChunkJobData).recipientIds)) {
+      return this.processChunkMessage(msg, data as ChunkJobData);
+    }
+
+    // Type narrowing: data is now JobData
+    const jobData = data as JobData;
     const traceId = msg.headers?.get("X-Trace-Id") || undefined;
 
     return withTraceAsync(async () => {
@@ -386,26 +428,52 @@ export class NatsEmailWorker {
         textContent,
         data: webhookData,
         dryRun,
-      } = data;
+      } = jobData;
 
       const hotState = getHotStateManager();
 
       // Idempotency check: skip if already processed
-      // Try Dragonfly first, fall back to PostgreSQL if unavailable
+      // Layer 1: Try Dragonfly (fast path)
+      // Layer 2: Fall back to PostgreSQL if:
+      //   - Dragonfly is unavailable (throws error)
+      //   - Dragonfly returns null (data missing after restart)
+      // This prevents duplicate sends when Dragonfly restarts and loses in-memory data
       let existingStatus: string | null = null;
+      let needsPostgresFallback = false;
+
       try {
         existingStatus = await hotState.checkRecipientProcessed(batchId, recipientId);
+        // If Dragonfly returns null, we need to check PostgreSQL as backup
+        // This handles the case where Dragonfly restarted and lost data
+        if (existingStatus === null) {
+          needsPostgresFallback = true;
+        }
       } catch (error) {
         // Dragonfly unavailable - fall back to PostgreSQL
         log.email.warn({ batchId, recipientId, error }, "Dragonfly unavailable for idempotency check, falling back to PostgreSQL");
+        needsPostgresFallback = true;
+      }
+
+      // PostgreSQL fallback for idempotency (source of truth)
+      if (needsPostgresFallback && !existingStatus) {
         const pgRecipient = await db.query.recipients.findFirst({
           where: eq(recipients.id, recipientId),
           columns: { status: true },
         });
         if (pgRecipient && (pgRecipient.status === "sent" || pgRecipient.status === "failed" || pgRecipient.status === "bounced" || pgRecipient.status === "complained")) {
           existingStatus = pgRecipient.status;
+          // Warm the cache for next time (write-through)
+          try {
+            const redis = hotState.getRedis();
+            const code = pgRecipient.status === "sent" ? "s" : pgRecipient.status === "failed" ? "f" : pgRecipient.status === "bounced" ? "b" : "c";
+            await redis.hset(`batch:${batchId}:recipients`, recipientId, `${code}:`);
+          } catch {
+            // Cache warming is best-effort, don't fail the check
+          }
+          log.email.debug({ batchId, recipientId, status: existingStatus }, "idempotency check via PostgreSQL fallback");
         }
       }
+
       if (existingStatus) {
         log.email.debug({ batchId, recipientId, status: existingStatus }, "skipped (already processed)");
         return;
@@ -500,6 +568,222 @@ export class NatsEmailWorker {
       clickhouseEventsTotal.inc({ event_type: "sent" });
 
       log.email.debug({ batchId, to: recipientIdentifier, module: sendConfig.module }, "sent");
+
+      // O(1) completion check
+      if (isComplete) {
+        await hotState.markBatchCompleted(batchId);
+        batchesProcessedTotal.inc({ status: "completed" });
+        log.batch.info({ id: batchId, sent: counters.sent, failed: counters.failed }, "completed");
+      }
+    }, traceId);
+  }
+
+  /**
+   * Process a chunk of recipients using batch execution.
+   * This is the new high-throughput path that uses executeBatch.
+   */
+  private async processChunkMessage(msg: JsMsg, chunk: ChunkJobData): Promise<void> {
+    const traceId = msg.headers?.get("X-Trace-Id") || undefined;
+
+    return withTraceAsync(async () => {
+      const { batchId, userId, chunkIndex, recipientIds, sendConfig, dryRun } = chunk;
+      const timer = createTimer();
+
+      const hotState = getHotStateManager();
+
+      // Batch idempotency check - get all already-processed recipients
+      const alreadyProcessed = await hotState.checkRecipientsProcessedBatch(batchId, recipientIds);
+
+      // Filter out already-processed recipients
+      const toProcess = recipientIds.filter((id) => !alreadyProcessed.has(id));
+
+      if (toProcess.length === 0) {
+        log.email.debug({ batchId, chunkIndex, skipped: recipientIds.length }, "chunk skipped (all already processed)");
+        return;
+      }
+
+      // Fetch recipient data from database
+      const recipientRows = await db.query.recipients.findMany({
+        where: inArray(recipients.id, toProcess),
+      });
+
+      if (recipientRows.length === 0) {
+        log.email.warn({ batchId, chunkIndex, toProcess: toProcess.length }, "no recipients found in database");
+        return;
+      }
+
+      // Fetch batch data for payload building (fromEmail, subject, etc.)
+      const batch = await db.query.batches.findFirst({
+        where: eq(batches.id, batchId),
+        columns: {
+          payload: true,
+          fromEmail: true,
+          fromName: true,
+          subject: true,
+          htmlContent: true,
+          textContent: true,
+        },
+      });
+
+      const module = getModule(sendConfig.module);
+      if (!module) {
+        throw new Error(`Unknown module type: ${sendConfig.module}`);
+      }
+
+      // Build payloads for batch execution
+      const batchPayloads: BatchJobPayload[] = recipientRows.map((r: Recipient) => {
+        const jobPayload = buildJobPayload({
+          sendConfig,
+          batchPayload: batch?.payload as BatchPayload | undefined,
+          legacyFields: {
+            fromEmail: batch?.fromEmail || undefined,
+            fromName: batch?.fromName || undefined,
+            subject: batch?.subject || undefined,
+            htmlContent: batch?.htmlContent || undefined,
+            textContent: batch?.textContent || undefined,
+          },
+          recipient: {
+            identifier: r.identifier || r.email || "",
+            name: r.name || undefined,
+            variables: r.variables as Record<string, string> | undefined,
+          },
+          webhookData: undefined,
+        });
+
+        return {
+          recipientId: r.id,
+          payload: jobPayload,
+        };
+      });
+
+      // Rate limiting - acquire ONE token for this batch request
+      const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000);
+      if (!rateLimitResult.allowed) {
+        throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
+      }
+
+      const sendTimer = emailSendDuration.startTimer({ provider: sendConfig.module, status: "success" });
+      let batchResults: import("../modules/types.js").BatchJobResult[];
+
+      if (dryRun) {
+        // Dry run - simulate success for all
+        const minLatency = config.DRY_RUN_LATENCY_MIN_MS;
+        const maxLatency = config.DRY_RUN_LATENCY_MAX_MS;
+        const simulatedLatency = config.HIGH_THROUGHPUT_TEST_MODE
+          ? 1
+          : minLatency + Math.random() * (maxLatency - minLatency);
+        if (simulatedLatency > 1) {
+          await new Promise((resolve) => setTimeout(resolve, simulatedLatency));
+        }
+
+        batchResults = batchPayloads.map((p) => ({
+          recipientId: p.recipientId,
+          result: {
+            success: true,
+            providerMessageId: `dry-run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+            latencyMs: simulatedLatency,
+          },
+        }));
+        log.email.debug({ batchId, chunkIndex, count: batchPayloads.length }, "dry run - skipped outbound calls");
+      } else if (module.supportsBatch && module.executeBatch) {
+        // Use batch execution
+        const configForModule = {
+          id: sendConfig.id,
+          userId,
+          name: "embedded",
+          module: sendConfig.module,
+          config: sendConfig.config,
+          rateLimit: sendConfig.rateLimit ?? null,
+          isDefault: false,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        batchResults = await module.executeBatch(batchPayloads, configForModule);
+      } else {
+        // Fallback to individual execution for non-batch modules
+        const configForModule = {
+          id: sendConfig.id,
+          userId,
+          name: "embedded",
+          module: sendConfig.module,
+          config: sendConfig.config,
+          rateLimit: sendConfig.rateLimit ?? null,
+          isDefault: false,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        batchResults = [];
+        for (const p of batchPayloads) {
+          const result = await module.execute(p.payload, configForModule);
+          batchResults.push({ recipientId: p.recipientId, result });
+        }
+      }
+
+      sendTimer();
+
+      // Convert batch results to hot state format and record atomically
+      const resultsForHotState = batchResults.map((r) => ({
+        recipientId: r.recipientId,
+        success: r.result.success,
+        providerMessageId: r.result.providerMessageId,
+        errorMessage: r.result.error,
+      }));
+
+      const { counters, isComplete } = await hotState.recordResultsBatch(batchId, resultsForHotState);
+
+      // Log events to ClickHouse
+      const recipientMap = new Map<string, Recipient>(recipientRows.map((r: Recipient) => [r.id, r]));
+      for (const r of batchResults) {
+        const recipient = recipientMap.get(r.recipientId);
+        const identifier = recipient?.identifier || recipient?.email || "";
+
+        if (r.result.success) {
+          logEventBuffered({
+            event_type: "sent",
+            module_type: sendConfig.module,
+            batch_id: batchId,
+            recipient_id: r.recipientId,
+            user_id: userId,
+            email: identifier,
+            provider_message_id: r.result.providerMessageId || "",
+          });
+
+          if (r.result.providerMessageId && sendConfig.module === "email") {
+            indexProviderMessageBuffered({
+              provider_message_id: r.result.providerMessageId,
+              batch_id: batchId,
+              recipient_id: r.recipientId,
+              user_id: userId,
+            });
+          }
+
+          emailsSentTotal.inc({ provider: sendConfig.module, status: "sent" });
+          clickhouseEventsTotal.inc({ event_type: "sent" });
+        } else {
+          logEventBuffered({
+            event_type: "failed",
+            module_type: sendConfig.module,
+            batch_id: batchId,
+            recipient_id: r.recipientId,
+            user_id: userId,
+            email: identifier,
+            error_message: r.result.error || "Unknown error",
+          });
+
+          emailErrorsTotal.inc({ provider: sendConfig.module, error_type: "permanent" });
+          clickhouseEventsTotal.inc({ event_type: "failed" });
+        }
+      }
+
+      const successCount = batchResults.filter((r) => r.result.success).length;
+      const failCount = batchResults.length - successCount;
+
+      log.email.debug(
+        { batchId, chunkIndex, sent: successCount, failed: failCount, duration: timer() },
+        "chunk processed"
+      );
 
       // O(1) completion check
       if (isComplete) {

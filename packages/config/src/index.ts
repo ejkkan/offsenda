@@ -35,7 +35,7 @@ export const configSchema = z.object({
   // NATS JetStream
   // ===========================================================================
   NATS_CLUSTER: z.string().default("nats://localhost:4222"),
-  NATS_REPLICAS: z.coerce.number().min(1).max(5).default(1),
+  NATS_REPLICAS: z.coerce.number().min(1).max(5).default(3),
   NATS_MAX_MSGS_PER_SUBJECT: z.coerce.number().default(1_000_000),
   NATS_TLS_ENABLED: stringBoolean.default(false),
   NATS_TLS_CA_FILE: z.string().optional(),
@@ -54,8 +54,14 @@ export const configSchema = z.object({
 
   // ===========================================================================
   // Dragonfly (Redis-compatible, for rate limiting & hot state)
+  // Split architecture: critical (batch state) + auxiliary (rate limiting, caching)
   // ===========================================================================
+  /** Legacy URL - fallback if split URLs not configured */
   DRAGONFLY_URL: z.string().default("localhost:6379"),
+  /** Critical instance for HotStateManager (batch state, prevents duplicate sends) */
+  DRAGONFLY_CRITICAL_URL: z.string().default("dragonfly-critical.batchsender.svc:6379"),
+  /** Auxiliary instance for rate limiting, caching (fail-open services) */
+  DRAGONFLY_AUXILIARY_URL: z.string().default("dragonfly-auxiliary.batchsender.svc:6379"),
   HOT_STATE_COMPLETED_TTL_HOURS: z.coerce.number().default(48),
   HOT_STATE_ACTIVE_TTL_DAYS: z.coerce.number().default(7),
 

@@ -38,9 +38,9 @@ export class RateLimitRegistry {
       this.redis = redis;
       this.isConnected = true;
     } else {
-      // Production mode: simple Redis connection
-      // Dragonfly Operator handles HA behind the service
-      const [host, portStr] = config.DRAGONFLY_URL.split(":");
+      // Production mode: Use AUXILIARY Dragonfly instance (fail-open service)
+      const dragonflyUrl = config.DRAGONFLY_AUXILIARY_URL || config.DRAGONFLY_URL;
+      const [host, portStr] = dragonflyUrl.split(":");
       const port = parseInt(portStr || "6379");
 
       this.redis = new Redis({
@@ -227,9 +227,13 @@ export class RateLimitRegistry {
       const args: (string | number)[] = [now, limiters.length];
       for (const limiter of limiters) {
         args.push(limiter.config.tokensPerSecond);
-        // Allow 2-second burst capacity for faster ramp-up, minimum 1000
+        // Burst capacity: at least 10 tokens, at most 1 minute worth
+        // This prevents low rate limits (e.g., 5/sec) from getting excessive burst (was 1000)
         const burstCapacity = limiter.config.burstCapacity ||
-          Math.max(limiter.config.tokensPerSecond * 2, 1000);
+          Math.min(
+            Math.max(limiter.config.tokensPerSecond * 2, 10),
+            limiter.config.tokensPerSecond * 60
+          );
         args.push(burstCapacity);
       }
 

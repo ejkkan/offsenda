@@ -28,6 +28,14 @@ export interface JobPayload {
 }
 
 /**
+ * Batch job payload - includes recipient identifier
+ */
+export interface BatchJobPayload {
+  recipientId: string;
+  payload: JobPayload;
+}
+
+/**
  * Result of executing a job
  */
 export interface JobResult {
@@ -39,12 +47,45 @@ export interface JobResult {
 }
 
 /**
+ * Result of executing a batch job - includes recipient identifier
+ */
+export interface BatchJobResult {
+  recipientId: string;
+  result: JobResult;
+}
+
+/**
  * Validation result for config or payload
  */
 export interface ValidationResult {
   valid: boolean;
   errors?: string[];
 }
+
+/**
+ * Provider limits - defines max batch size and throughput per provider
+ */
+export interface ProviderLimits {
+  /** Maximum recipients per API request */
+  maxBatchSize: number;
+  /** Maximum API requests per second */
+  maxRequestsPerSecond: number;
+}
+
+/**
+ * System-defined provider limits (based on provider capabilities)
+ */
+export const PROVIDER_LIMITS: Record<string, ProviderLimits> = {
+  // Email providers
+  ses: { maxBatchSize: 50, maxRequestsPerSecond: 14 },       // AWS SES SendBulkEmail limit
+  resend: { maxBatchSize: 100, maxRequestsPerSecond: 100 },  // Resend batch API
+  // SMS providers
+  telnyx: { maxBatchSize: 1, maxRequestsPerSecond: 50 },     // SMS is typically 1:1
+  // Webhooks - user configurable, these are defaults
+  webhook: { maxBatchSize: 100, maxRequestsPerSecond: 100 },
+  // Mock provider for testing
+  mock: { maxBatchSize: 100, maxRequestsPerSecond: 10000 },
+};
 
 /**
  * Module interface - all modules must implement this
@@ -55,6 +96,9 @@ export interface Module {
 
   /** Human-readable name */
   readonly name: string;
+
+  /** Whether this module supports batch execution */
+  readonly supportsBatch: boolean;
 
   /**
    * Validate module configuration when user saves it
@@ -67,9 +111,15 @@ export interface Module {
   validatePayload(payload: JobPayload): ValidationResult;
 
   /**
-   * Execute the job (send email, call webhook, etc.)
+   * Execute a single job (send email, call webhook, etc.)
    */
   execute(payload: JobPayload, sendConfig: SendConfig): Promise<JobResult>;
+
+  /**
+   * Execute a batch of jobs (optional - only if supportsBatch is true)
+   * Returns results in same order as input payloads
+   */
+  executeBatch?(payloads: BatchJobPayload[], sendConfig: SendConfig): Promise<BatchJobResult[]>;
 }
 
 /**

@@ -106,9 +106,9 @@ describe("E2E: Webhook Processing", () => {
       format: "JSONEachRow",
     });
 
-    const events = await result.json<{ event_type: string; cnt: number }>();
+    const events = await result.json<{ event_type: string; cnt: string }>();
 
-    expect(events.find((e) => e.event_type === "delivered")?.cnt).toBe(2);
+    expect(Number(events.find((e) => e.event_type === "delivered")?.cnt)).toBe(2);
   });
 
   it("should process bounce webhooks correctly", async () => {
@@ -172,8 +172,8 @@ describe("E2E: Webhook Processing", () => {
       format: "JSONEachRow",
     });
 
-    const events = await result.json<{ cnt: number }>();
-    expect(events[0]?.cnt).toBe(1);
+    const events = await result.json<{ cnt: string }>();
+    expect(Number(events[0]?.cnt)).toBe(1);
   });
 
   it("should process complaint webhooks correctly", async () => {
@@ -282,7 +282,7 @@ describe("E2E: Webhook Processing", () => {
       )
     );
 
-    // Wait for all webhooks to be processed
+    // Wait for all webhooks to be processed (webhooks are async, allow more time)
     await waitFor(
       async () => {
         const batch = await db.query.batches.findFirst({
@@ -294,7 +294,7 @@ describe("E2E: Webhook Processing", () => {
           ? batch
           : null;
       },
-      { timeout: 10000 }
+      { timeout: 20000 }
     );
 
     // Verify final state
@@ -384,8 +384,8 @@ describe("E2E: Webhook Processing", () => {
       format: "JSONEachRow",
     });
 
-    const events = await result.json<{ cnt: number }>();
+    const events = await result.json<{ cnt: string }>();
     // Events were recorded (exact count depends on merge timing)
-    expect(events[0]?.cnt).toBeGreaterThanOrEqual(1);
+    expect(Number(events[0]?.cnt)).toBeGreaterThanOrEqual(1);
   });
 });

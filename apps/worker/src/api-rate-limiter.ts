@@ -32,10 +32,11 @@ export class RateLimiterService {
       // Use provided Redis instance (for testing)
       this.redis = redis;
     } else {
-      // Create new Redis connection
+      // Create new Redis connection - use AUXILIARY instance (fail-open service)
+      const dragonflyUrl = config.DRAGONFLY_AUXILIARY_URL || config.DRAGONFLY_URL;
       this.redis = new Redis({
-        host: config.DRAGONFLY_URL.split(":")[0],
-        port: parseInt(config.DRAGONFLY_URL.split(":")[1] || "6379"),
+        host: dragonflyUrl.split(":")[0],
+        port: parseInt(dragonflyUrl.split(":")[1] || "6379"),
         maxRetriesPerRequest: 3,
         enableReadyCheck: true,
         retryStrategy: (times) => {

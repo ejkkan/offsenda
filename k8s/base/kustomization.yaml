@@ -12,11 +12,19 @@ resources:
   - postgres/statefulset.yaml
   - postgres/service.yaml
   - postgres/init-configmap.yaml
-  # DragonflyDB - For distributed rate limiting
+  # DragonflyDB - For distributed rate limiting and hot state
   # NOTE: Requires dragonfly-operator to be installed first (k8s/operators/dragonfly)
+  # Legacy single instance (kept for backwards compatibility during migration)
   - dragonfly/dragonfly-instance.yaml
   - dragonfly/service.yaml
   - dragonfly/networkpolicy.yaml
+  # New split architecture: critical (batch state) + auxiliary (rate limiting, caching)
+  - dragonfly-critical/dragonfly-instance.yaml
+  - dragonfly-critical/service.yaml
+  - dragonfly-critical/networkpolicy.yaml
+  - dragonfly-auxiliary/dragonfly-instance.yaml
+  - dragonfly-auxiliary/service.yaml
+  - dragonfly-auxiliary/networkpolicy.yaml
   # NATS - Message queue with TLS
   - nats/statefulset.yaml
   - nats/service.yaml

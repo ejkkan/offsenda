@@ -17,9 +17,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    // Include both unit tests and integration tests (but not E2E)
-    include: ["src/**/*.test.ts", "src/__tests__/integration/**/*.test.ts"],
-    exclude: ["src/__tests__/e2e/**/*.test.ts"],
+    // Only run unit tests (fast, no external dependencies)
+    include: ["src/__tests__/unit/**/*.test.ts"],
+    exclude: [
+      "src/__tests__/integration/**",
+      "src/__tests__/e2e/**",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],

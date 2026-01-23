@@ -116,10 +116,10 @@ describe("E2E: Basic Batch Flow", () => {
       format: "JSONEachRow",
     });
 
-    const events = await eventResult.json<{ event_type: string; cnt: number }>();
+    const events = await eventResult.json<{ event_type: string; cnt: string }>();
 
-    expect(events.find((e) => e.event_type === "queued")?.cnt).toBe(3);
-    expect(events.find((e) => e.event_type === "sent")?.cnt).toBe(3);
+    expect(Number(events.find((e) => e.event_type === "queued")?.cnt)).toBe(3);
+    expect(Number(events.find((e) => e.event_type === "sent")?.cnt)).toBe(3);
 
     // 6. Simulate webhooks (delivery notifications)
     for (const recipient of allRecipients) {
@@ -175,8 +175,8 @@ describe("E2E: Basic Batch Flow", () => {
       format: "JSONEachRow",
     });
 
-    const deliveryEvents = await deliveryResult.json<{ cnt: number }>();
-    expect(deliveryEvents[0]?.cnt).toBe(3);
+    const deliveryEvents = await deliveryResult.json<{ cnt: string }>();
+    expect(Number(deliveryEvents[0]?.cnt)).toBe(3);
   });
 
   it("should handle batch with variable substitution", async () => {

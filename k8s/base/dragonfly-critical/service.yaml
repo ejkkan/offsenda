@@ -1,0 +1,16 @@
+# Service for Dragonfly Critical Instance
+# The Dragonfly Operator creates its own service that routes to the master.
+# This service provides a stable endpoint for the critical instance.
+apiVersion: v1
+kind: Service
+metadata:
+  name: dragonfly-critical
+  namespace: batchsender
+spec:
+  type: ClusterIP
+  selector:
+    app: dragonfly-critical
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis

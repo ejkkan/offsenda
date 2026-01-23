@@ -3,7 +3,7 @@ import { eq, sql, inArray, and } from "drizzle-orm";
 import { recipients, batches } from "@batchsender/db";
 import { db } from "../db.js";
 import { log } from "../logger.js";
-import { logEmailEvent, type EmailEventType } from "../clickhouse.js";
+import { logEmailEvent, type EventType } from "../clickhouse.js";
 import type { NatsClient } from "../nats/client.js";
 import { enqueueFailuresTotal } from "../metrics.js";
 
@@ -14,7 +14,7 @@ import { enqueueFailuresTotal } from "../metrics.js";
 export interface WebhookEvent {
   id: string; // Unique event ID for deduplication
   provider: "resend" | "ses" | "telnyx" | "twilio" | "custom";
-  eventType: EmailEventType | "sms.delivered" | "sms.failed" | "custom.event";
+  eventType: EventType;
   providerMessageId: string;
   recipientId?: string; // May need to lookup
   batchId?: string;
@@ -346,7 +346,7 @@ export class WebhookEventFactory {
     }
 
     return {
-      id: `telnyx-${messageId}-${Date.now()}`,
+      id: `telnyx-${messageId}-${processedEventType}`,
       provider: "telnyx",
       eventType: processedEventType,
       providerMessageId: messageId,
@@ -373,7 +373,7 @@ export class WebhookEventFactory {
     };
 
     return {
-      id: `resend-${event.data.email_id}-${Date.now()}`,
+      id: `resend-${event.data.email_id}-${typeMap[event.type] || "failed"}`,
       provider: "resend",
       eventType: typeMap[event.type] || "failed",
       providerMessageId: event.data.email_id,
@@ -405,7 +405,7 @@ export class WebhookEventFactory {
     }
 
     return {
-      id: `ses-${notification.mail.messageId}-${Date.now()}`,
+      id: `ses-${notification.mail.messageId}-${eventType}`,
       provider: "ses",
       eventType,
       providerMessageId: notification.mail.messageId,
@@ -445,7 +445,7 @@ export class WebhookEventFactory {
     }
 
     return {
-      id: `custom-${moduleId}-${providerMessageId}-${Date.now()}`,
+      id: `custom-${moduleId}-${providerMessageId}-${eventType}`,
       provider: "custom",
       eventType,
       providerMessageId,

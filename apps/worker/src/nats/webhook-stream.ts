@@ -1,5 +1,6 @@
-import { JetStreamManager } from "nats";
+import { JetStreamManager, RetentionPolicy, StorageType, DiscardPolicy } from "nats";
 import { log } from "../logger.js";
+import { config } from "../config.js";
 
 /**
  * Create NATS JetStream configuration for webhook processing
@@ -15,13 +16,13 @@ export async function setupWebhookStream(jsm: JetStreamManager): Promise<void> {
       await jsm.streams.add({
         name: "webhooks",
         subjects: ["webhook.>"], // webhook.<provider>.<event_type> (supports nested types like sms.delivered)
-        retention: "workqueue", // Delete after acknowledgment
-        storage: "file",
-        replicas: 1,
+        retention: RetentionPolicy.Workqueue, // Delete after acknowledgment
+        storage: StorageType.File,
+        num_replicas: config.NATS_REPLICAS,
         max_msgs_per_subject: 10_000, // Prevent runaway growth
         max_age: 24 * 60 * 60 * 1e9, // 24 hours
         max_bytes: 1024 * 1024 * 1024, // 1GB
-        discard: "old", // Discard old messages when limits reached
+        discard: DiscardPolicy.Old, // Discard old messages when limits reached
         duplicate_window: 60 * 1e9, // 60 second dedup window
       });
 

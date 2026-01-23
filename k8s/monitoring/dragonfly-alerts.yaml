@@ -1,0 +1,80 @@
+# Dragonfly Alerting Rules
+# Monitors memory usage and circuit breaker state for critical Dragonfly instance
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: dragonfly-alerts
+  namespace: monitoring
+  labels:
+    app: prometheus
+    release: prometheus
+spec:
+  groups:
+    - name: dragonfly
+      rules:
+        # Memory Warnings
+        - alert: DragonflyMemoryWarning
+          expr: dragonfly_memory_ratio{instance="critical"} > 0.75
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Dragonfly memory usage above 75%"
+            description: "Dragonfly {{ $labels.instance }} instance is using {{ $value | humanizePercentage }} of available memory. Consider scaling or investigating memory usage patterns."
+
+        - alert: DragonflyMemoryCritical
+          expr: dragonfly_memory_ratio{instance="critical"} > 0.90
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Dragonfly memory usage critical (>90%)"
+            description: "Dragonfly {{ $labels.instance }} instance is using {{ $value | humanizePercentage }} of available memory. Immediate action required to prevent OOM and potential data loss."
+
+        # Circuit Breaker Alerts
+        - alert: DragonflyCircuitBreakerOpen
+          expr: dragonfly_circuit_breaker_state{component="hot-state"} == 2
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Dragonfly circuit breaker is OPEN"
+            description: "The {{ $labels.component }} circuit breaker is open, indicating Dragonfly connectivity issues. Batch processing is degraded - duplicate sends are being prevented but no new batches can be processed."
+
+        - alert: DragonflyCircuitBreakerHalfOpen
+          expr: dragonfly_circuit_breaker_state{component="hot-state"} == 1
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Dragonfly circuit breaker is HALF-OPEN"
+            description: "The {{ $labels.component }} circuit breaker is in half-open state, testing Dragonfly connectivity. If this persists, check Dragonfly cluster health."
+
+        # Backpressure Alerts
+        - alert: DragonflyBackpressureActive
+          expr: rate(batches_rejected_memory_pressure_total[5m]) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Batches being rejected due to memory pressure"
+            description: "Dragonfly memory pressure is causing batches to be delayed. This indicates the system is at capacity. Rate: {{ $value | humanize }}/s"
+
+        - alert: DragonflyBackpressureHigh
+          expr: rate(batches_rejected_memory_pressure_total[5m]) > 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "High batch rejection rate due to memory pressure"
+            description: "Sustained high rate of batch rejections ({{ $value | humanize }}/s) due to Dragonfly memory pressure. Scale Dragonfly or reduce batch volume."
+
+        # Connection Health
+        - alert: DragonflyConnectionErrors
+          expr: rate(dragonfly_circuit_breaker_failures_total[5m]) > 0.1
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Dragonfly connection errors detected"
+            description: "Dragonfly circuit breaker is recording failures at {{ $value | humanize }}/s. Check network connectivity and Dragonfly cluster health."

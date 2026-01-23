@@ -10,7 +10,7 @@
  */
 
 import { eq, and, gt, asc, sql, inArray } from "drizzle-orm";
-import { recipients } from "@batchsender/db";
+import { recipients, type RecipientStatus } from "@batchsender/db";
 import { db } from "../../db.js";
 import { log } from "../../logger.js";
 
@@ -26,7 +26,7 @@ export interface RecipientRow {
   email: string | null;
   name: string | null;
   variables: unknown;
-  status: string;
+  status: RecipientStatus;
 }
 
 /**
@@ -36,7 +36,7 @@ export interface PaginationOptions {
   /** Number of recipients per page (default: 1000) */
   pageSize?: number;
   /** Only fetch recipients with this status (default: 'pending') */
-  status?: string;
+  status?: RecipientStatus;
 }
 
 /**
@@ -175,7 +175,7 @@ export async function* streamRecipients(
  */
 export async function countRecipients(
   batchId: string,
-  status: string = "pending"
+  status: RecipientStatus = "pending"
 ): Promise<number> {
   const result = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -196,7 +196,7 @@ export async function countRecipients(
  */
 export async function updateRecipientsStatus(
   recipientIds: string[],
-  newStatus: string
+  newStatus: RecipientStatus
 ): Promise<void> {
   if (recipientIds.length === 0) return;
 

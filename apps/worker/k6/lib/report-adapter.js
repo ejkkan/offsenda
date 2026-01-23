@@ -183,11 +183,12 @@ export function generateTestReport(data, options) {
   };
 
   // Return files to write
+  // Paths are relative to where k6 is run (typically apps/worker/)
   return {
     'stdout': textSummary(data, { indent: ' ', enableColors: true }),
-    [`../test-reports/latest.json`]: JSON.stringify(report, null, 2),
-    [`../test-reports/latest-${testType}.json`]: JSON.stringify(report, null, 2),
-    [`../test-reports/history/${date}/${runId}.json`]: JSON.stringify(report, null, 2),
+    [`./test-reports/latest.json`]: JSON.stringify(report, null, 2),
+    [`./test-reports/latest-${testType}.json`]: JSON.stringify(report, null, 2),
+    [`./test-reports/history/${date}/${runId}.json`]: JSON.stringify(report, null, 2),
   };
 }
 

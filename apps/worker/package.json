@@ -19,10 +19,9 @@
     "start:webhook": "node dist/webhook-processor.js",
     "start:leader": "node dist/leader-services.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run src/providers/*.test.ts src/__tests__/rate-limiter.test.ts",
-    "test:unit": "vitest run src/providers/*.test.ts src/__tests__/rate-limiter.test.ts",
-    "test:ratelimit": "vitest run src/__tests__/rate-limiter.test.ts",
-    "test:ratelimit:integration": "vitest run src/__tests__/rate-limiter.integration.test.ts",
+    "test": "vitest run --config vitest.config.ts",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:e2e:watch": "vitest --config vitest.e2e.config.ts",
@@ -38,7 +37,13 @@
     "k6:stress": "k6 run k6/stress-test.js",
     "k6:flow": "k6 run k6/batch-flow.js",
     "k6:webhook": "k6 run k6/webhook-throughput.js",
-    "k6:webhook:stress": "k6 run -e SCENARIO=stress k6/webhook-throughput.js"
+    "k6:webhook:stress": "k6 run -e SCENARIO=stress k6/webhook-throughput.js",
+    "k6:remote:smoke": "k6 run -e INTENSITY=smoke k6/scenarios/remote-stress.js",
+    "k6:remote:light": "k6 run -e INTENSITY=light k6/scenarios/remote-stress.js",
+    "k6:remote:medium": "k6 run -e INTENSITY=medium k6/scenarios/remote-stress.js",
+    "k6:remote:heavy": "k6 run -e INTENSITY=heavy k6/scenarios/remote-stress.js",
+    "k6:remote:stress": "k6 run -e INTENSITY=stress k6/scenarios/remote-stress.js",
+    "k6:remote:soak": "k6 run -e INTENSITY=soak k6/scenarios/remote-stress.js"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.500.0",

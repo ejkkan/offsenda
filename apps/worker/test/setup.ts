@@ -75,6 +75,8 @@ async function startInfrastructure(): Promise<void> {
   process.env.CLICKHOUSE_PASSWORD = "test";
   process.env.CLICKHOUSE_DATABASE = "batchsender_test";
   process.env.DRAGONFLY_URL = "localhost:6380"; // Test Dragonfly instance
+  process.env.DRAGONFLY_CRITICAL_URL = "localhost:6380"; // Use same test instance
+  process.env.DRAGONFLY_AUXILIARY_URL = "localhost:6380"; // Use same test instance
   process.env.WEBHOOK_SECRET = "test-webhook-secret";
   process.env.DISABLE_RATE_LIMIT = "true"; // Disable rate limiting for E2E tests
 
@@ -177,6 +179,8 @@ async function startWorker(): Promise<void> {
       CLICKHOUSE_DATABASE: "batchsender_test",
       CLICKHOUSE_FLUSH_INTERVAL_MS: "500", // Fast flush for tests (default is 5000ms)
       DRAGONFLY_URL: "localhost:6380", // Test Dragonfly instance
+      DRAGONFLY_CRITICAL_URL: "localhost:6380", // Use same test instance
+      DRAGONFLY_AUXILIARY_URL: "localhost:6380", // Use same test instance
       WEBHOOK_SECRET: "test-webhook-secret",
       DISABLE_RATE_LIMIT: "true", // Disable rate limiting for E2E tests
     },

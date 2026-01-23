@@ -18,6 +18,7 @@ import type { EmailModuleConfig, SmsModuleConfig, SendConfigData } from "@batchs
 import type { EmbeddedSendConfig } from "../nats/queue-service.js";
 import { config } from "../config.js";
 import { log } from "../logger.js";
+import { LIMITS } from "../limits.js";
 import { getRateLimitRegistry, closeRateLimitRegistry } from "./rate-limit-registry.js";
 import { buildManagedContext, isEmailManagedMode, isSmsManagedMode } from "./managed-flow.js";
 import { buildByokContext } from "./byok-flow.js";
@@ -40,6 +41,39 @@ function isManagedMode(module: ModuleType, moduleConfig: SendConfigData): boolea
   }
   // Other modules (webhook, push) don't have managed mode
   return false;
+}
+
+/**
+ * Get the default rate limit for a send config based on mode and provider
+ *
+ * Uses provider-aware defaults from LIMITS instead of a hardcoded value.
+ * This ensures safe defaults that won't overwhelm external providers.
+ */
+function getDefaultRateLimit(sendConfig: EmbeddedSendConfig): number {
+  const module = sendConfig.module;
+  const moduleConfig = sendConfig.config as EmailModuleConfig | SmsModuleConfig;
+
+  // Webhook module has its own default
+  if (module === "webhook") {
+    return LIMITS.providerDefaults.webhook.perSecond;
+  }
+
+  // Managed mode uses shared infrastructure default
+  if (isManagedMode(module as ModuleType, moduleConfig)) {
+    return LIMITS.providerDefaults.managed.perSecond;
+  }
+
+  // BYOK mode: use provider-specific default
+  const provider = (moduleConfig as EmailModuleConfig).provider;
+  if (provider === "ses") {
+    return LIMITS.providerDefaults.ses.perSecond;
+  }
+  if (provider === "resend") {
+    return LIMITS.providerDefaults.resend.perSecond;
+  }
+
+  // Fallback for unknown providers (conservative)
+  return LIMITS.providerDefaults.webhook.perSecond;
 }
 
 /**
@@ -86,7 +120,10 @@ export async function acquireRateLimit(
   }
 
   // Get the per-config rate limit (from sendConfig)
-  const configRateLimit = sendConfig.rateLimit?.perSecond || 1000;
+  // Use new requestsPerSecond field, fallback to deprecated perSecond, then provider default
+  const configRateLimit = sendConfig.rateLimit?.requestsPerSecond
+    ?? sendConfig.rateLimit?.perSecond
+    ?? getDefaultRateLimit(sendConfig);
 
   // Build context based on managed vs BYOK
   const context = buildContext(sendConfig, userId);
@@ -127,7 +164,9 @@ export async function getRateLimitStatus(
   }
 
   const context = buildContext(sendConfig, userId);
-  const configRateLimit = sendConfig.rateLimit?.perSecond || 1000;
+  const configRateLimit = sendConfig.rateLimit?.requestsPerSecond
+    ?? sendConfig.rateLimit?.perSecond
+    ?? getDefaultRateLimit(sendConfig);
   const registry = getRateLimitRegistry();
 
   return registry.getStatus(context, configRateLimit);

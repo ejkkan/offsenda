@@ -30,6 +30,7 @@ import { LeaderElectionService, getLeaderElection } from "./services/leader-elec
 // High-throughput components
 import { getBufferedLogger } from "./buffered-logger.js";
 import { getHotStateManager } from "./hot-state-manager.js";
+import { runPreflight } from "./preflight.js";
 
 const app = Fastify({
   logger: false,  // We use our own structured logger
@@ -133,6 +134,10 @@ let leaderElection: LeaderElectionService;
 let auditService: AuditService;
 let postgresSyncService: PostgresSyncService;
 
+// Interval references for cleanup on shutdown
+let syncQueuedInterval: NodeJS.Timeout | null = null;
+let cleanupConsumersInterval: NodeJS.Timeout | null = null;
+
 // Register routes - webhooks registered after NATS initialization
 
 // Sync queued batches from DB to NATS queue
@@ -212,28 +217,24 @@ try {
     return { status: "ok", timestamp: new Date().toISOString() };
   });
 
+  // Run preflight checks BEFORE accepting any work
+  // This validates Dragonfly is healthy, configured correctly, and has persistence
+  const preflightResult = await runPreflight();
+  if (!preflightResult.ready) {
+    log.system.error({}, "Preflight checks failed - exiting");
+    process.exit(1);
+  }
+
   // Initialize rate limiter
   rateLimiterService = new RateLimiterService();
   log.system.info({}, "rate limiter initialized");
-
-  // Test Dragonfly connection (rate limiter uses it)
-  const dragonflyHealthy = await rateLimiterService.healthCheck();
-  if (!dragonflyHealthy) {
-    log.system.error({}, "Dragonfly connection failed for rate limiter");
-    // Don't exit - fail open is acceptable for rate limiting
-  }
 
   // Initialize hot state manager BEFORE workers start (workers depend on it for idempotency)
   const hotState = getHotStateManager({
     completedBatchTtlMs: config.HOT_STATE_COMPLETED_TTL_HOURS * 60 * 60 * 1000,
     activeBatchTtlMs: config.HOT_STATE_ACTIVE_TTL_DAYS * 24 * 60 * 60 * 1000,
   });
-  const hotStateHealthy = await hotState.healthCheck();
-  if (!hotStateHealthy) {
-    log.system.error({}, "HotStateManager connection failed - Dragonfly required for message processing");
-    process.exit(1);
-  }
-  log.system.info({}, "HotStateManager initialized (Dragonfly connected)");
+  log.system.info({}, "HotStateManager initialized");
 
   // Start buffered ClickHouse logger (workers use this for event logging)
   const bufferedLogger = getBufferedLogger({
@@ -319,10 +320,10 @@ try {
   await syncQueuedBatchesToQueue();
 
   // Start periodic sync for new batches (every 5 seconds)
-  setInterval(syncQueuedBatchesToQueue, 5000);
+  syncQueuedInterval = setInterval(syncQueuedBatchesToQueue, 5000);
 
   // Start periodic cleanup of idle consumers (every hour)
-  setInterval(() => {
+  cleanupConsumersInterval = setInterval(() => {
     queueService.cleanupIdleConsumers().catch((error) => {
       log.system.warn({ error }, "Consumer cleanup failed");
     });
@@ -382,6 +383,17 @@ async function shutdown() {
 
   // Phase 1: Stop accepting new work
   log.system.debug({}, "Phase 1: Stop accepting new work");
+
+  // Clear periodic intervals to prevent further work
+  if (syncQueuedInterval) {
+    clearInterval(syncQueuedInterval);
+    syncQueuedInterval = null;
+  }
+  if (cleanupConsumersInterval) {
+    clearInterval(cleanupConsumersInterval);
+    cleanupConsumersInterval = null;
+  }
+
   await withTimeout(app.close(), 2000, "Fastify"); // Stop HTTP server first
   scheduler.stop();
   batchRecovery.stop();

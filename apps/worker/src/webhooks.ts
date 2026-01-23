@@ -5,7 +5,8 @@ import { z } from "zod";
 import { recipients, batches } from "@batchsender/db";
 import { db } from "./db.js";
 import { config } from "./config.js";
-import { logEmailEvent, lookupByProviderMessageId, type EmailEventType } from "./clickhouse.js";
+import { logEmailEvent, lookupByProviderMessageId, type EventType } from "./clickhouse.js";
+import type { CoreEventType } from "./types/events.js";
 import { log } from "./logger.js";
 import { getNatsHealth } from "./nats/monitoring.js";
 import type { NatsClient } from "./nats/client.js";
@@ -213,7 +214,7 @@ export async function registerWebhooks(
       }
 
       // Map SES notification type to our event type
-      let eventType: EmailEventType;
+      let eventType: CoreEventType;
       switch (sesNotification.notificationType) {
         case "Delivery":
           eventType = "delivered";
@@ -230,7 +231,7 @@ export async function registerWebhooks(
       }
 
       // Update recipient status in PostgreSQL
-      const statusMap: Record<EmailEventType, typeof recipients.$inferSelect.status> = {
+      const statusMap: Record<CoreEventType, typeof recipients.$inferSelect.status> = {
         delivered: "delivered",
         bounced: "bounced",
         soft_bounced: "bounced",

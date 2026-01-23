@@ -13,9 +13,9 @@ import type { ModuleType } from "@batchsender/db";
 export type { ModuleType } from "@batchsender/db";
 
 /**
- * Event types for recipient lifecycle tracking
+ * Core event types for recipient lifecycle tracking
  */
-export type EventType =
+export type CoreEventType =
   | "queued"
   | "sent"
   | "delivered"
@@ -25,6 +25,24 @@ export type EventType =
   | "soft_bounced"
   | "complained"
   | "failed";
+
+/**
+ * SMS-specific event types
+ */
+export type SmsEventType =
+  | "sms.delivered"
+  | "sms.failed";
+
+/**
+ * Custom module event types
+ */
+export type CustomEventType =
+  | "custom.event";
+
+/**
+ * All event types (email, SMS, custom)
+ */
+export type EventType = CoreEventType | SmsEventType | CustomEventType;
 
 /**
  * @deprecated Use EventType instead

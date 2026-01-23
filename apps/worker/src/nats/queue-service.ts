@@ -6,6 +6,7 @@ import { enqueueFailuresTotal } from "../metrics.js";
 // Import shared types - single source of truth
 import type {
   BatchJobData,
+  ChunkJobData,
   EmbeddedSendConfig,
   JobData,
   EmailJobData,
@@ -17,6 +18,7 @@ import type {
 // Re-export for backwards compatibility
 export type {
   BatchJobData,
+  ChunkJobData,
   EmbeddedSendConfig,
   JobData,
   EmailJobData,
@@ -68,6 +70,105 @@ export class NatsQueueService {
       log.queue.error({ error, batchId, userId }, "failed to enqueue batch");
       throw error;
     }
+  }
+
+  /**
+   * Enqueue a chunk of recipients for batch processing
+   * Each chunk contains multiple recipient IDs processed together
+   */
+  async enqueueRecipientChunk(chunk: ChunkJobData): Promise<void> {
+    const timer = createTimer();
+    const msgID = `chunk-${chunk.batchId}-${chunk.chunkIndex}`;
+
+    // Add traceId to NATS message headers for distributed tracing
+    const hdrs = natsHeaders();
+    const traceId = getTraceId();
+    if (traceId) {
+      hdrs.set("X-Trace-Id", traceId);
+    }
+
+    try {
+      const ack = await this.js.publish(
+        `email.user.${chunk.userId}.chunk`,
+        this.sc.encode(JSON.stringify(chunk)),
+        {
+          msgID, // Deduplication
+          headers: hdrs,
+          expect: {
+            streamName: "email-system",
+          },
+        }
+      );
+
+      if (!ack.duplicate) {
+        log.queue.debug(
+          {
+            batchId: chunk.batchId,
+            chunkIndex: chunk.chunkIndex,
+            recipientCount: chunk.recipientIds.length,
+            seq: ack.seq,
+          },
+          "chunk enqueued"
+        );
+      }
+    } catch (error) {
+      log.queue.error(
+        { error, batchId: chunk.batchId, chunkIndex: chunk.chunkIndex },
+        "failed to enqueue chunk"
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Bulk enqueue recipient chunks
+   */
+  async enqueueRecipientChunks(chunks: ChunkJobData[]): Promise<EnqueueResult> {
+    if (chunks.length === 0) {
+      return { success: 0, failed: 0, errors: [] };
+    }
+
+    const timer = createTimer();
+    let successCount = 0;
+    const errors: Array<{ email: string; error: string }> = [];
+
+    // Process chunks - no need for extra chunking, they're already sized
+    const results = await Promise.allSettled(
+      chunks.map((chunk) => this.enqueueRecipientChunk(chunk))
+    );
+
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        successCount++;
+      } else {
+        const errorMessage = result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason);
+        errors.push({
+          email: `chunk-${chunks[index].chunkIndex}`,
+          error: errorMessage,
+        });
+        enqueueFailuresTotal.inc({ queue: "chunk" });
+      }
+    });
+
+    log.queue.info(
+      {
+        batchId: chunks[0]?.batchId,
+        totalChunks: chunks.length,
+        totalRecipients: chunks.reduce((sum, c) => sum + c.recipientIds.length, 0),
+        success: successCount,
+        failed: errors.length,
+        duration: timer(),
+      },
+      "bulk chunk enqueue completed"
+    );
+
+    return {
+      success: successCount,
+      failed: errors.length,
+      errors,
+    };
   }
 
   // Email operations

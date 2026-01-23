@@ -1,4 +1,4 @@
-import { JsMsg, StringCodec } from "nats";
+import { JsMsg, StringCodec, DeliverPolicy, AckPolicy } from "nats";
 import { config } from "../config.js";
 import { NatsClient } from "./client.js";
 import { log } from "../logger.js";
@@ -94,8 +94,8 @@ export class NatsWebhookWorkerRefactored {
       await jsm.consumers.add("webhooks", {
         name: "webhook-processor",
         filter_subject: "webhook.>",
-        deliver_policy: "all",
-        ack_policy: "explicit",
+        deliver_policy: DeliverPolicy.All,
+        ack_policy: AckPolicy.Explicit,
         max_deliver: 3,
         ack_wait: 30_000, // 30 seconds
         max_ack_pending: 1000,

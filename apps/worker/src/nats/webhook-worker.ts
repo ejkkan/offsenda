@@ -1,4 +1,4 @@
-import { JsMsg, StringCodec } from "nats";
+import { JsMsg, StringCodec, DeliverPolicy, AckPolicy } from "nats";
 import { eq, sql, inArray } from "drizzle-orm";
 import { recipients, batches } from "@batchsender/db";
 import { db } from "../db.js";
@@ -10,7 +10,7 @@ import { logEventBuffered, getBufferedLogger } from "../buffered-logger.js";
 import { getHotStateManager } from "../hot-state-manager.js";
 import { calculateNatsBackoff } from "../domain/utils/backoff.js";
 import { getCacheService } from "../services/cache-service.js";
-import { lookupByProviderMessageId } from "../clickhouse.js";
+import { lookupByProviderMessageId, type ModuleType } from "../clickhouse.js";
 import { getWebhookMatcher } from "../services/webhook-matcher.js";
 import {
   webhooksReceivedTotal,
@@ -38,6 +38,9 @@ export class NatsWebhookWorker {
   private isShuttingDown = false;
   private consumerPromise: Promise<void> | null = null;
   private consumerMessages: { stop(): void } | null = null;
+
+  // Track pending messages for ACK after batch completion
+  private pendingMessages: Map<string, JsMsg> = new Map();
 
   // Configuration
   private readonly batchSize = config.WEBHOOK_BATCH_SIZE || 100;
@@ -70,8 +73,8 @@ export class NatsWebhookWorker {
         await jsm.consumers.add("webhooks", {
           name: "webhook-processor",
           filter_subject: "webhook.>",
-          deliver_policy: "all",
-          ack_policy: "explicit",
+          deliver_policy: DeliverPolicy.All,
+          ack_policy: AckPolicy.Explicit,
           max_deliver: 3,
           ack_wait: 30_000, // 30 seconds to process
           max_ack_pending: 1000,
@@ -115,8 +118,9 @@ export class NatsWebhookWorker {
           event_type: event.eventType
         });
 
-        // Add to buffer
+        // Add to buffer and track pending message for later ACK
         this.eventBuffer.push(event);
+        this.pendingMessages.set(event.id, msg);
         webhookQueueDepth.set(this.eventBuffer.length);
 
         // Process batch if full
@@ -127,8 +131,7 @@ export class NatsWebhookWorker {
           this.scheduleFlush();
         }
 
-        // Acknowledge message
-        msg.ack();
+        // Note: Message ACK/NAK now happens in processBatch() after successful/failed completion
 
         log.webhook.debug({
           provider: event.provider,
@@ -210,6 +213,15 @@ export class NatsWebhookWorker {
           duplicates: duplicateEvents.length,
           new: newEvents.length
         }, "Deduplication check complete");
+
+        // ACK duplicate events - they're already processed
+        for (const event of duplicateEvents) {
+          const msg = this.pendingMessages.get(event.id);
+          if (msg) {
+            msg.ack();
+            this.pendingMessages.delete(event.id);
+          }
+        }
       }
 
       // If no new events, skip processing
@@ -220,18 +232,6 @@ export class NatsWebhookWorker {
 
       // Process events that need recipient lookups
       await this.enrichEventsWithRecipientInfo(newEvents);
-
-      // Mark events as processed in cache
-      const markPromises = newEvents.map(e =>
-        cacheService.markWebhookProcessed(
-          e.provider,
-          e.providerMessageId,
-          e.eventType
-        )
-      );
-      await Promise.all(markPromises).catch(err =>
-        log.webhook.debug({ error: err }, "Failed to mark some webhooks as processed")
-      );
 
       // Group events by type for efficient processing
       const deliveryEvents = newEvents.filter(e =>
@@ -273,10 +273,22 @@ export class NatsWebhookWorker {
       // Execute all updates in parallel
       await Promise.all(updates);
 
+      // Mark events as processed in cache (AFTER successful DB updates)
+      const markPromises = newEvents.map(e =>
+        cacheService.markWebhookProcessed(
+          e.provider,
+          e.providerMessageId,
+          e.eventType
+        )
+      );
+      await Promise.all(markPromises).catch(err =>
+        log.webhook.debug({ error: err }, "Failed to mark some webhooks as processed")
+      );
+
       // Batch log to ClickHouse
       const clickhouseEvents = newEvents.map(event => ({
         event_type: event.eventType,
-        module_type: event.provider === "telnyx" || event.provider === "twilio" ? "sms" : "email",
+        module_type: (event.provider === "telnyx" || event.provider === "twilio" ? "sms" : "email") as ModuleType,
         batch_id: event.batchId || "",
         recipient_id: event.recipientId || "",
         user_id: event.userId || "",
@@ -294,6 +306,15 @@ export class NatsWebhookWorker {
           event_type: event.eventType,
           status: "success"
         });
+      }
+
+      // ACK all successfully processed messages
+      for (const event of newEvents) {
+        const msg = this.pendingMessages.get(event.id);
+        if (msg) {
+          msg.ack();
+          this.pendingMessages.delete(event.id);
+        }
       }
 
       timer({ status: "success" });
@@ -314,7 +335,15 @@ export class NatsWebhookWorker {
         "Failed to process webhook batch"
       );
 
-      // Don't re-queue - let NATS handle retry
+      // NAK all messages in this batch so NATS can retry
+      for (const event of batch) {
+        const msg = this.pendingMessages.get(event.id);
+        if (msg) {
+          msg.nak(calculateNatsBackoff(msg.info.redeliveryCount));
+          this.pendingMessages.delete(event.id);
+        }
+      }
+
       throw error;
     } finally {
       this.isProcessing = false;

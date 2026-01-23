@@ -4,6 +4,7 @@ import { WebhookEnricher } from "./webhook-enricher.js";
 import { DatabaseBatchUpdater } from "./database-batch-updater.js";
 import { log, createTimer } from "../logger.js";
 import { getBufferedLogger } from "../buffered-logger.js";
+import type { ModuleType } from "../clickhouse.js";
 import {
   webhooksProcessedTotal,
   webhooksErrorsTotal,
@@ -15,7 +16,8 @@ export interface ProcessingResult {
   processed: number;
   duplicates: number;
   errors: number;
-  duration: number;
+  /** Formatted duration string (e.g., "100ms", "1.5s") */
+  duration: string;
 }
 
 /**
@@ -40,7 +42,7 @@ export class WebhookBatchProcessor {
       processed: 0,
       duplicates: 0,
       errors: 0,
-      duration: 0,
+      duration: "",
     };
 
     try {
@@ -69,13 +71,10 @@ export class WebhookBatchProcessor {
       // Step 2: Enrich events with recipient information
       const enrichResult = await this.enricher.enrichBatch(dedupResult.newEvents);
 
-      // Step 3: Mark events as processed (do this before DB updates)
-      await this.deduplicator.markProcessed(enrichResult.enrichedEvents);
-
-      // Step 4: Group events by type
+      // Step 3: Group events by type
       const groupedEvents = this.groupEventsByType(enrichResult.enrichedEvents);
 
-      // Step 5: Process each group
+      // Step 4: Process each group
       const updatePromises = [];
 
       if (groupedEvents.deliveries.length > 0) {
@@ -105,8 +104,12 @@ export class WebhookBatchProcessor {
       // Wait for all database updates
       await Promise.all(updatePromises);
 
-      // Step 6: Log to ClickHouse
+      // Step 5: Log to ClickHouse
       await this.logToClickHouse(enrichResult.enrichedEvents);
+
+      // Step 6: Mark events as processed (AFTER successful DB updates)
+      // This ensures we don't lose events if DB update fails
+      this.deduplicator.markProcessed(enrichResult.enrichedEvents);
 
       // Step 7: Update metrics
       for (const event of enrichResult.enrichedEvents) {
@@ -181,7 +184,7 @@ export class WebhookBatchProcessor {
   private async logToClickHouse(events: WebhookEvent[]): Promise<void> {
     const clickhouseEvents = events.map(event => ({
       event_type: event.eventType,
-      module_type: event.provider === "telnyx" || event.provider === "twilio" ? "sms" : "email",
+      module_type: (event.provider === "telnyx" || event.provider === "twilio" ? "sms" : "email") as ModuleType,
       batch_id: event.batchId || "",
       recipient_id: event.recipientId || "",
       user_id: event.userId || "",

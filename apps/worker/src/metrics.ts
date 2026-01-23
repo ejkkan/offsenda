@@ -267,6 +267,58 @@ export const webhookQueueDepth = new promClient.Gauge({
 });
 
 // ============================================
+// Dragonfly Memory Metrics
+// ============================================
+
+/**
+ * Gauge: Dragonfly memory used in bytes
+ * Labels: instance (critical/auxiliary)
+ */
+export const dragonflyMemoryUsed = new promClient.Gauge({
+  name: 'dragonfly_memory_used_bytes',
+  help: 'Dragonfly memory used in bytes',
+  labelNames: ['instance'],
+});
+
+/**
+ * Gauge: Dragonfly memory usage ratio (0-1)
+ * Labels: instance (critical/auxiliary)
+ */
+export const dragonflyMemoryRatio = new promClient.Gauge({
+  name: 'dragonfly_memory_ratio',
+  help: 'Dragonfly memory usage ratio (0-1)',
+  labelNames: ['instance'],
+});
+
+/**
+ * Gauge: Dragonfly max memory configured
+ * Labels: instance (critical/auxiliary)
+ */
+export const dragonflyMemoryMax = new promClient.Gauge({
+  name: 'dragonfly_memory_max_bytes',
+  help: 'Dragonfly max memory configured in bytes',
+  labelNames: ['instance'],
+});
+
+/**
+ * Gauge: Circuit breaker state (0=closed, 1=half-open, 2=open)
+ * Labels: component (hot-state/cache/rate-limit)
+ */
+export const dragonflyCircuitBreakerState = new promClient.Gauge({
+  name: 'dragonfly_circuit_breaker_state',
+  help: 'Circuit breaker state (0=closed, 1=half-open, 2=open)',
+  labelNames: ['component'],
+});
+
+/**
+ * Counter: Batches rejected due to memory pressure (backpressure)
+ */
+export const batchesRejectedMemoryPressure = new promClient.Counter({
+  name: 'batches_rejected_memory_pressure_total',
+  help: 'Total number of batches rejected due to Dragonfly memory pressure',
+});
+
+// ============================================
 // Failure Tracking Metrics
 // ============================================
 

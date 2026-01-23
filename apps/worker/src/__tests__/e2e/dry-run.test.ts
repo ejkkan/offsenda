@@ -118,10 +118,10 @@ describe("E2E: Dry Run Mode", () => {
       format: "JSONEachRow",
     });
 
-    const events = await eventResult.json<{ event_type: string; cnt: number }>();
+    const events = await eventResult.json<{ event_type: string; cnt: string }>();
 
-    expect(events.find((e) => e.event_type === "queued")?.cnt).toBe(3);
-    expect(events.find((e) => e.event_type === "sent")?.cnt).toBe(3);
+    expect(Number(events.find((e) => e.event_type === "queued")?.cnt)).toBe(3);
+    expect(Number(events.find((e) => e.event_type === "sent")?.cnt)).toBe(3);
 
     // 9. Verify batch completed
     const finalBatch = await db.query.batches.findFirst({

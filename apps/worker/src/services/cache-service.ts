@@ -10,7 +10,9 @@ export class CacheService {
   private isConnected = false;
 
   constructor() {
-    this.redis = new Redis(config.DRAGONFLY_URL, {
+    // Use AUXILIARY Dragonfly instance for caching (fail-open service)
+    const dragonflyUrl = config.DRAGONFLY_AUXILIARY_URL || config.DRAGONFLY_URL;
+    this.redis = new Redis(dragonflyUrl, {
       enableOfflineQueue: false,
       maxRetriesPerRequest: 3,
       retryStrategy: (times) => {

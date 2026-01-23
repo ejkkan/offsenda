@@ -1,0 +1,28 @@
+# Dragonfly Auxiliary Instance
+# Used for non-critical services:
+# - API Rate Limiter (FAIL-OPEN)
+# - Cache Service for message lookups (FAIL-OPEN)
+# - Rate Limit Registry (FAIL-OPEN)
+# - Leader Election (FAIL-OPEN)
+# LRU EVICTION: OK to evict stale rate limit data under memory pressure
+apiVersion: dragonflydb.io/v1alpha1
+kind: Dragonfly
+metadata:
+  name: dragonfly-auxiliary
+  namespace: batchsender
+spec:
+  replicas: 2  # 1 master + 1 replica (lower redundancy for non-critical)
+  labels:
+    role: master  # Fix for operator bug - service selector requires this label
+  resources:
+    requests:
+      cpu: "500m"
+      memory: 2Gi
+    limits:
+      cpu: "2"
+      memory: 5Gi
+  args:
+    - "--maxmemory"
+    - "4gb"
+    - "--maxmemory-policy"
+    - "volatile-lru"  # OK to evict TTL'd data (rate limits) under pressure

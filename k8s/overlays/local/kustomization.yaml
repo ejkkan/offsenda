@@ -57,6 +57,42 @@ patches:
       kind: StatefulSet
       name: dragonfly
 
+  # Dragonfly-critical: single replica, local storage for local dev
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/snapshot/persistentVolumeClaimSpec/storageClassName
+        value: local-path
+      - op: replace
+        path: /spec/snapshot/persistentVolumeClaimSpec/resources/requests/storage
+        value: 1Gi
+      - op: replace
+        path: /spec/resources/requests/memory
+        value: 512Mi
+      - op: replace
+        path: /spec/resources/limits/memory
+        value: 1Gi
+    target:
+      kind: Dragonfly
+      name: dragonfly-critical
+
+  # Dragonfly-auxiliary: single replica for local dev (no persistence needed)
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/resources/requests/memory
+        value: 256Mi
+      - op: replace
+        path: /spec/resources/limits/memory
+        value: 512Mi
+    target:
+      kind: Dragonfly
+      name: dragonfly-auxiliary
+
   # Single-node NATS for local dev with TLS
   - patch: |-
       - op: replace

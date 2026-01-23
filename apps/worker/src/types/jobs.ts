@@ -36,6 +36,23 @@ export interface BatchJobData {
 }
 
 /**
+ * Chunk processing job - processes a chunk of recipients
+ * Used for batch execution (50+ recipients per chunk)
+ */
+export interface ChunkJobData {
+  batchId: string;
+  userId: string;
+  /** Chunk index for ordering/deduplication */
+  chunkIndex: number;
+  /** Array of recipient IDs in this chunk */
+  recipientIds: string[];
+  /** Embedded send config (no DB lookup needed during processing) */
+  sendConfig: EmbeddedSendConfig;
+  /** Dry run mode - skip actual outbound calls */
+  dryRun?: boolean;
+}
+
+/**
  * Embedded send config - included in job messages to avoid DB lookups
  */
 export interface EmbeddedSendConfig {

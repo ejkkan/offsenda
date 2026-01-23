@@ -35,7 +35,9 @@ export class NatsClient {
       name: `worker-${config.WORKER_ID}`,
       reconnect: true,
       maxReconnectAttempts: -1,
-      reconnectTimeWait: 2000,
+      reconnectTimeWait: 1000,         // Base wait time
+      reconnectJitter: 1000,           // Add 0-1000ms random jitter to prevent thundering herd
+      reconnectJitterTLS: 2000,        // More jitter for TLS connections
       pingInterval: 30000,
       maxPingOut: 3,
     };
@@ -123,7 +125,7 @@ export class NatsClient {
       try {
         await this.jsm!.streams.add({
           name: "email-system",
-          subjects: ["sys.batch.*", "email.user.*.send", "email.priority.*"],
+          subjects: ["sys.batch.*", "email.user.*.send", "email.user.*.chunk", "email.priority.*"],
           retention: RetentionPolicy.Workqueue,
           storage: StorageType.File,
           num_replicas: config.NATS_REPLICAS,
@@ -171,7 +173,7 @@ export class NatsClient {
           max_bytes: 1024 * 1024 * 1024, // 1GB
           discard: DiscardPolicy.Old,
           max_msgs_per_subject: 10000,
-          duplicate_window: 60 * 1e9, // 60 seconds deduplication window
+          duplicate_window: 3600 * 1e9, // 1 hour deduplication window (increased from 60s)
           deny_delete: true, // Prevent accidental stream deletion
           deny_purge: true, // Prevent accidental purge
         });

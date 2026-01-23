@@ -294,8 +294,15 @@ export type WebhookBatchPayload = {
 export type BatchPayload = EmailBatchPayload | SmsBatchPayload | PushBatchPayload | WebhookBatchPayload;
 
 export type RateLimitConfig = {
+  /** Max API requests per second */
+  requestsPerSecond?: number;
+  /** Recipients per API request (batch size) */
+  recipientsPerRequest?: number;
+  /** @deprecated Use requestsPerSecond instead */
   perSecond?: number;
+  /** @deprecated Not used in new batch model */
   perMinute?: number;
+  /** Daily limit on total recipients */
   dailyLimit?: number;
 };
 

@@ -1,7 +1,8 @@
-import type { Module, JobPayload, JobResult, ValidationResult, SendConfig } from "./types.js";
+import type { Module, JobPayload, JobResult, ValidationResult, SendConfig, BatchJobPayload, BatchJobResult } from "./types.js";
 import type { SmsModuleConfig } from "@batchsender/db";
 import { config } from "../config.js";
 import { log } from "../logger.js";
+import { interpolateVariables } from "../domain/utils/template.js";
 
 /**
  * SMS payload with SMS-specific fields
@@ -17,10 +18,17 @@ interface SmsPayload extends JobPayload {
  * Supports two modes:
  * - managed: Uses BatchSender's infrastructure (Telnyx from env vars)
  * - byok: Uses user's own API credentials (Bring Your Own Key)
+ *
+ * Batch execution: Makes parallel individual API calls (no batch API available).
+ * Concurrency is limited to avoid overwhelming the provider.
  */
 export class SmsModule implements Module {
   readonly type = "sms";
   readonly name = "SMS";
+  readonly supportsBatch = true;
+
+  // Max parallel requests when executing a batch (Telnyx limit is ~15/sec)
+  private readonly maxParallelRequests = 10;
 
   validateConfig(rawConfig: unknown): ValidationResult {
     const errors: string[] = [];
@@ -113,6 +121,45 @@ export class SmsModule implements Module {
   }
 
   /**
+   * Execute a batch of SMS sends using parallel individual API calls.
+   * SMS providers (Telnyx) don't have batch APIs, so we make parallel calls
+   * with controlled concurrency to avoid overwhelming the provider.
+   */
+  async executeBatch(payloads: BatchJobPayload[], sendConfig: SendConfig): Promise<BatchJobResult[]> {
+    const start = Date.now();
+    const results: BatchJobResult[] = new Array(payloads.length);
+
+    // Process in chunks to control concurrency
+    for (let i = 0; i < payloads.length; i += this.maxParallelRequests) {
+      const chunk = payloads.slice(i, i + this.maxParallelRequests);
+      const chunkPromises = chunk.map(async (p, chunkIndex) => {
+        const result = await this.execute(p.payload, sendConfig);
+        return {
+          index: i + chunkIndex,
+          recipientId: p.recipientId,
+          result,
+        };
+      });
+
+      const chunkResults = await Promise.all(chunkPromises);
+      for (const r of chunkResults) {
+        results[r.index] = {
+          recipientId: r.recipientId,
+          result: r.result,
+        };
+      }
+    }
+
+    const latencyMs = Date.now() - start;
+    log.system.debug(
+      { count: payloads.length, latencyMs, parallelism: this.maxParallelRequests },
+      "SMS batch completed"
+    );
+
+    return results;
+  }
+
+  /**
    * Send using BatchSender's managed infrastructure
    */
   private async sendManaged(payload: SmsPayload, cfg: SmsModuleConfig): Promise<string> {
@@ -170,7 +217,7 @@ export class SmsModule implements Module {
     const requestBody: Record<string, any> = {
       from: payload.fromNumber || config.fromNumber,
       to: payload.to,
-      text: this.interpolateVariables(payload.message || "", payload.variables),
+      text: interpolateVariables(payload.message || "", payload.variables),
       type: "SMS",
     };
 
@@ -198,14 +245,17 @@ export class SmsModule implements Module {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        const errorData = await response.json().catch(() => ({})) as {
+          errors?: Array<{ detail?: string }>;
+          message?: string;
+        };
         const errorMessage = errorData.errors?.[0]?.detail ||
                            errorData.message ||
                            `Telnyx API error: ${response.status} ${response.statusText}`;
         throw new Error(errorMessage);
       }
 
-      const data = await response.json();
+      const data = await response.json() as { data: { id: string } };
 
       // Telnyx returns the message ID in data.data.id
       return data.data.id;
@@ -216,14 +266,6 @@ export class SmsModule implements Module {
       }
       throw new Error("Unknown error sending SMS via Telnyx");
     }
-  }
-
-  private interpolateVariables(text: string, variables?: Record<string, string>): string {
-    if (!variables) return text;
-
-    return text.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-      return variables[key] || match;
-    });
   }
 
   private isValidPhoneNumber(phone: string): boolean {
