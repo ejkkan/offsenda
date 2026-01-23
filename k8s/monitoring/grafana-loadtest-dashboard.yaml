@@ -470,6 +470,48 @@ data:
           "type": "stat"
         },
         {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 }] },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 31 },
+          "id": 13,
+          "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{
+            "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+            "expr": "batches_stuck",
+            "refId": "A"
+          }],
+          "title": "Stuck Batches",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 31 },
+          "id": 14,
+          "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{
+            "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+            "expr": "batches_recovered_total",
+            "refId": "A"
+          }],
+          "title": "Batches Recovered",
+          "type": "stat"
+        },
+        {
           "collapsed": false,
           "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
           "id": 102,

@@ -2,7 +2,7 @@ import { eq, and, lt, sql } from "drizzle-orm";
 import { batches, recipients } from "@batchsender/db";
 import { db } from "../db.js";
 import { log, createTimer } from "../logger.js";
-import { batchesProcessedTotal } from "../metrics.js";
+import { batchesProcessedTotal, batchesStuck, batchesRecoveredTotal } from "../metrics.js";
 import type { LeaderElectionService } from "./leader-election.js";
 
 // =============================================================================
@@ -177,6 +177,9 @@ export class BatchRecoveryService {
 
       result.stuckBatchesFound = stuckBatches.length;
 
+      // Update the stuck batches gauge
+      batchesStuck.set(stuckBatches.length);
+
       if (stuckBatches.length === 0) {
         log.system.debug({}, "no stuck batches found");
         return result;
@@ -282,8 +285,9 @@ export class BatchRecoveryService {
       })
       .where(eq(batches.id, batchId));
 
-    // Record metric
+    // Record metrics
     batchesProcessedTotal.inc({ status: "recovered" });
+    batchesRecoveredTotal.inc();
 
     log.batch.info(
       { id: batchId, recipients: batchRecipients.length },

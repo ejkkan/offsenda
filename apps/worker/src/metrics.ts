@@ -80,6 +80,22 @@ export const batchesInProgress = new promClient.Gauge({
   help: 'Number of batches currently being processed',
 });
 
+/**
+ * Gauge: Batches stuck in processing state (processing > threshold)
+ */
+export const batchesStuck = new promClient.Gauge({
+  name: 'batches_stuck',
+  help: 'Number of batches stuck in processing state',
+});
+
+/**
+ * Counter: Total stuck batches recovered
+ */
+export const batchesRecoveredTotal = new promClient.Counter({
+  name: 'batches_recovered_total',
+  help: 'Total number of stuck batches recovered',
+});
+
 // ============================================
 // NATS Queue Metrics
 // ============================================
