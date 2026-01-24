@@ -81,6 +81,16 @@ export const batchesInProgress = new promClient.Gauge({
 });
 
 /**
+ * Gauge: Pending recipients across all processing batches
+ * This is the primary metric for KEDA scaling - represents actual work remaining.
+ * Calculated as: SUM(total_recipients - sent_count - failed_count) for all processing batches
+ */
+export const pendingRecipientsTotal = new promClient.Gauge({
+  name: 'pending_recipients_total',
+  help: 'Total pending recipients across all processing batches (for KEDA scaling)',
+});
+
+/**
  * Gauge: Batches stuck in processing state (processing > threshold)
  */
 export const batchesStuck = new promClient.Gauge({

@@ -11,12 +11,13 @@ spec:
   pollingInterval: 2  # Check queue every 2 seconds (faster scale-up)
   cooldownPeriod: 15  # Wait 15s before scaling down (faster reactions)
   triggers:
-  # Use actual pending work from NATS consumers, not total stream messages
-  # nats_queue_depth_email_processor = sum of pending messages across user-* consumers
+  # Use global pending recipients counter from Dragonfly (exposed via Prometheus)
+  # This counter is incremented when batches start and decremented as recipients are processed
+  # More accurate than NATS queue depth since workers pull messages immediately
   - type: prometheus
     metadata:
       serverAddress: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
-      metricName: nats_pending_emails
-      query: max(nats_queue_depth_email_processor)
-      threshold: "500"  # Scale up when >500 pending emails per pod
-      activationThreshold: "50"  # Activate scaling when >50 pending emails
+      metricName: pending_recipients
+      query: max(pending_recipients_total)
+      threshold: "5000"  # Scale up when >5000 pending recipients per pod
+      activationThreshold: "500"  # Activate scaling when >500 pending recipients

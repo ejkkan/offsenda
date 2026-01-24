@@ -177,6 +177,9 @@ function decodeState(encoded: string): RecipientState {
   return { status };
 }
 
+// Global pending recipients key for KEDA scaling
+const GLOBAL_PENDING_KEY = "global:pending_recipients";
+
 // Lua scripts for atomic operations
 
 /**
@@ -187,6 +190,7 @@ const INCREMENT_SENT_SCRIPT = `
 local countersKey = KEYS[1]
 local recipientsKey = KEYS[2]
 local pendingSyncKey = KEYS[3]
+local globalPendingKey = KEYS[4]
 local recipientId = ARGV[1]
 local stateJson = ARGV[2]
 local ttl = tonumber(ARGV[3])
@@ -201,6 +205,9 @@ redis.call('HSET', recipientsKey, recipientId, stateJson)
 
 -- Add to pending sync set
 redis.call('SADD', pendingSyncKey, recipientId)
+
+-- Decrement global pending counter
+redis.call('DECR', globalPendingKey)
 
 -- Refresh TTL
 redis.call('PEXPIRE', countersKey, ttl)
@@ -224,6 +231,7 @@ const INCREMENT_FAILED_SCRIPT = `
 local countersKey = KEYS[1]
 local recipientsKey = KEYS[2]
 local pendingSyncKey = KEYS[3]
+local globalPendingKey = KEYS[4]
 local recipientId = ARGV[1]
 local stateJson = ARGV[2]
 local ttl = tonumber(ARGV[3])
@@ -238,6 +246,9 @@ redis.call('HSET', recipientsKey, recipientId, stateJson)
 
 -- Add to pending sync set
 redis.call('SADD', pendingSyncKey, recipientId)
+
+-- Decrement global pending counter
+redis.call('DECR', globalPendingKey)
 
 -- Refresh TTL
 redis.call('PEXPIRE', countersKey, ttl)
@@ -281,7 +292,7 @@ return nil
 
 /**
  * Batch record results - atomically update counters and recipient states
- * KEYS: [countersKey, recipientsKey, pendingSyncKey]
+ * KEYS: [countersKey, recipientsKey, pendingSyncKey, globalPendingKey]
  * ARGV: [ttl, sentCount, failedCount, recipientId1, state1, recipientId2, state2, ...]
  * Returns: [newSentCount, newFailedCount, total, isComplete]
  */
@@ -289,6 +300,7 @@ const BATCH_RECORD_RESULTS_SCRIPT = `
 local countersKey = KEYS[1]
 local recipientsKey = KEYS[2]
 local pendingSyncKey = KEYS[3]
+local globalPendingKey = KEYS[4]
 local ttl = tonumber(ARGV[1])
 local sentIncrement = tonumber(ARGV[2])
 local failedIncrement = tonumber(ARGV[3])
@@ -313,6 +325,10 @@ if #recipientArgs > 0 then
   redis.call('HMSET', recipientsKey, unpack(recipientArgs))
   redis.call('SADD', pendingSyncKey, unpack(syncArgs))
 end
+
+-- Decrement global pending counter by total processed
+local totalProcessed = sentIncrement + failedIncrement
+redis.call('DECRBY', globalPendingKey, totalProcessed)
 
 -- Refresh TTL
 redis.call('PEXPIRE', countersKey, ttl)
@@ -404,12 +420,12 @@ export class HotStateManager {
     }
 
     this.redis.defineCommand("incrementSent", {
-      numberOfKeys: 3,
+      numberOfKeys: 4,
       lua: INCREMENT_SENT_SCRIPT,
     });
 
     this.redis.defineCommand("incrementFailed", {
-      numberOfKeys: 3,
+      numberOfKeys: 4,
       lua: INCREMENT_FAILED_SCRIPT,
     });
 
@@ -419,7 +435,7 @@ export class HotStateManager {
     });
 
     this.redis.defineCommand("batchRecordResults", {
-      numberOfKeys: 3,
+      numberOfKeys: 4,
       lua: BATCH_RECORD_RESULTS_SCRIPT,
     });
 
@@ -621,6 +637,7 @@ export class HotStateManager {
 
       // First time initialization OR recovery from corrupted state (missing total)
       // Use HSET to set/overwrite all counters atomically
+      // Also increment global pending counter for KEDA scaling
       const result = await this.redis.pipeline()
         .hset(countersKey, {
           sent: "0",
@@ -628,6 +645,7 @@ export class HotStateManager {
           total: String(totalRecipients),
         })
         .pexpire(countersKey, ttl)
+        .incrby(GLOBAL_PENDING_KEY, totalRecipients)
         .exec();
 
       // Verify pipeline succeeded
@@ -637,7 +655,7 @@ export class HotStateManager {
       }
 
       this.recordSuccess();
-      log.system.debug({ batchId, totalRecipients }, "HotStateManager batch initialized");
+      log.system.debug({ batchId, totalRecipients }, "HotStateManager batch initialized, global pending incremented");
     } catch (error) {
       this.recordFailure(error as Error);
       log.system.error({ error, batchId }, "HotStateManager failed to initialize batch");
@@ -706,6 +724,7 @@ export class HotStateManager {
         countersKey,
         recipientsKey,
         pendingSyncKey,
+        GLOBAL_PENDING_KEY,
         recipientId,
         encodeState(state),
         ttl
@@ -751,6 +770,7 @@ export class HotStateManager {
         countersKey,
         recipientsKey,
         pendingSyncKey,
+        GLOBAL_PENDING_KEY,
         recipientId,
         encodeState(state),
         ttl
@@ -883,6 +903,7 @@ export class HotStateManager {
         countersKey,
         recipientsKey,
         pendingSyncKey,
+        GLOBAL_PENDING_KEY,
         ...args
       ) as [number, number, number, number];
 
@@ -1077,6 +1098,23 @@ export class HotStateManager {
       activeBatches,
       connected,
     };
+  }
+
+  /**
+   * Get global pending recipients count for KEDA scaling.
+   * This is an O(1) operation that reads the global counter.
+   * Returns 0 if the counter doesn't exist or on error.
+   */
+  async getGlobalPendingRecipients(): Promise<number> {
+    try {
+      const count = await this.redis.get(GLOBAL_PENDING_KEY);
+      const value = parseInt(count || "0", 10);
+      // Ensure we never return negative (shouldn't happen, but defensive)
+      return Math.max(0, value);
+    } catch (error) {
+      log.system.warn({ error }, "Failed to get global pending recipients");
+      return 0;
+    }
   }
 
   /**
