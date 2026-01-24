@@ -96,6 +96,36 @@ export const batchesRecoveredTotal = new promClient.Counter({
   help: 'Total number of stuck batches recovered',
 });
 
+/**
+ * Counter: Total batches reset to queued for reprocessing
+ */
+export const batchesResetTotal = new promClient.Counter({
+  name: 'batches_reset_total',
+  help: 'Total number of batches reset to queued due to stuck processing',
+});
+
+// ============================================
+// Worker Lifecycle Metrics
+// ============================================
+
+/**
+ * Counter: Worker startups (increments on each restart)
+ * Use this to detect crash loops or frequent restarts
+ */
+export const workerStartupsTotal = new promClient.Counter({
+  name: 'worker_startups_total',
+  help: 'Total number of worker startups (restarts)',
+});
+
+/**
+ * Gauge: Worker start timestamp (unix seconds)
+ * Use this to calculate uptime: now() - worker_start_timestamp
+ */
+export const workerStartTimestamp = new promClient.Gauge({
+  name: 'worker_start_timestamp_seconds',
+  help: 'Unix timestamp when worker started',
+});
+
 // ============================================
 // NATS Queue Metrics
 // ============================================

@@ -16,7 +16,7 @@ spec:
   - type: prometheus
     metadata:
       serverAddress: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
-      metricName: nats_queue_depth_email_processor
-      query: sum(nats_queue_depth_email_processor)
+      metricName: nats_queue_depth_total
+      query: sum(nats_queue_depth_total)
       threshold: "1000"  # Scale up when >1000 pending messages per pod
       activationThreshold: "100"  # Activate scaling when >100 messages

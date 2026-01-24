@@ -4,6 +4,7 @@ import { db } from "../db.js";
 import { log, createTimer } from "../logger.js";
 import { batchesProcessedTotal, batchesStuck, batchesRecoveredTotal } from "../metrics.js";
 import type { LeaderElectionService } from "./leader-election.js";
+import type { NatsQueueService } from "../nats/queue-service.js";
 
 // =============================================================================
 // Batch Recovery Service
@@ -65,6 +66,13 @@ export interface RecoveryScanResult {
 const FINAL_RECIPIENT_STATES = ["sent", "delivered", "bounced", "complained", "failed"];
 
 /**
+ * Threshold for resetting stuck batches with pending recipients (ms)
+ * If a batch is stuck for longer than this AND has recipients in "queued" status,
+ * reset it to "queued" so it can be re-processed
+ */
+const RESET_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+
+/**
  * Batch Recovery Service - detects and recovers stuck batches
  *
  * IMPORTANT: Only runs on the leader worker to prevent duplicate processing
@@ -75,10 +83,23 @@ export class BatchRecoveryService {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private isRunning = false;
   private leaderElection?: LeaderElectionService;
+  private queueService?: NatsQueueService;
 
-  constructor(config: Partial<BatchRecoveryConfig> = {}, leaderElection?: LeaderElectionService) {
+  constructor(
+    config: Partial<BatchRecoveryConfig> = {},
+    leaderElection?: LeaderElectionService,
+    queueService?: NatsQueueService
+  ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.leaderElection = leaderElection;
+    this.queueService = queueService;
+  }
+
+  /**
+   * Set the queue service (can be set after construction)
+   */
+  setQueueService(queueService: NatsQueueService): void {
+    this.queueService = queueService;
   }
 
   /**
@@ -248,9 +269,20 @@ export class BatchRecoveryService {
 
   /**
    * Attempt to recover a single stuck batch
-   * Returns true if the batch was recovered (marked as completed)
+   * Returns true if the batch was recovered (marked as completed or reset)
    */
   private async recoverBatch(batchId: string): Promise<boolean> {
+    // Get batch details including startedAt for age check
+    const batch = await db.query.batches.findFirst({
+      where: eq(batches.id, batchId),
+      columns: { id: true, startedAt: true, userId: true },
+    });
+
+    if (!batch) {
+      log.system.warn({ batchId }, "batch not found during recovery");
+      return false;
+    }
+
     // Get all recipients for this batch
     const batchRecipients = await db.query.recipients.findMany({
       where: eq(recipients.batchId, batchId),
@@ -262,39 +294,83 @@ export class BatchRecoveryService {
       (r: { status: string }) => FINAL_RECIPIENT_STATES.includes(r.status)
     );
 
-    if (!allDone) {
-      // Batch has recipients still being processed - not stuck, just slow
-      log.system.debug(
-        {
-          batchId,
-          total: batchRecipients.length,
-          pending: batchRecipients.filter((r: { status: string }) => !FINAL_RECIPIENT_STATES.includes(r.status)).length,
-        },
-        "batch has pending recipients, not recovering"
+    if (allDone) {
+      // All recipients are done - mark batch as completed
+      await db
+        .update(batches)
+        .set({
+          status: "completed",
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(batches.id, batchId));
+
+      // Record metrics
+      batchesProcessedTotal.inc({ status: "recovered" });
+      batchesRecoveredTotal.inc();
+
+      log.batch.info(
+        { id: batchId, recipients: batchRecipients.length },
+        "recovered stuck batch (all done)"
       );
-      return false;
+
+      return true;
     }
 
-    // All recipients are done - mark batch as completed
-    await db
-      .update(batches)
-      .set({
-        status: "completed",
-        completedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(batches.id, batchId));
+    // Check if batch has been stuck long enough to warrant a reset
+    const batchAge = batch.startedAt ? Date.now() - batch.startedAt.getTime() : 0;
+    const queuedRecipients = batchRecipients.filter(
+      (r: { status: string }) => r.status === "queued"
+    ).length;
 
-    // Record metrics
-    batchesProcessedTotal.inc({ status: "recovered" });
-    batchesRecoveredTotal.inc();
+    if (batchAge > RESET_THRESHOLD_MS && queuedRecipients > 0) {
+      // Batch has been stuck for too long with un-processed recipients
+      // Reset it to "queued" so it can be re-processed
+      log.batch.warn(
+        {
+          id: batchId,
+          ageMinutes: Math.round(batchAge / 60000),
+          total: batchRecipients.length,
+          queued: queuedRecipients,
+        },
+        "resetting stuck batch with pending recipients"
+      );
 
-    log.batch.info(
-      { id: batchId, recipients: batchRecipients.length },
-      "recovered stuck batch"
+      await db
+        .update(batches)
+        .set({
+          status: "queued",
+          startedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(batches.id, batchId));
+
+      // The syncQueuedBatchesToQueue() function (runs every 5s) will automatically
+      // pick up this batch and enqueue it to NATS for reprocessing
+
+      // Record metrics
+      batchesProcessedTotal.inc({ status: "reset" });
+      batchesRecoveredTotal.inc();
+
+      log.batch.info(
+        { id: batchId, queuedRecipients },
+        "batch reset to queued for reprocessing (will be auto-enqueued)"
+      );
+
+      return true;
+    }
+
+    // Batch has pending recipients but hasn't been stuck long enough
+    log.system.debug(
+      {
+        batchId,
+        total: batchRecipients.length,
+        pending: batchRecipients.filter((r: { status: string }) => !FINAL_RECIPIENT_STATES.includes(r.status)).length,
+        ageMinutes: Math.round(batchAge / 60000),
+      },
+      "batch has pending recipients, not old enough to reset"
     );
-
-    return true;
+    return false;
   }
 
   /**
@@ -324,10 +400,15 @@ export class BatchRecoveryService {
 let instance: BatchRecoveryService | null = null;
 
 export function getBatchRecoveryService(
-  config?: Partial<BatchRecoveryConfig>
+  config?: Partial<BatchRecoveryConfig>,
+  leaderElection?: LeaderElectionService,
+  queueService?: NatsQueueService
 ): BatchRecoveryService {
   if (!instance) {
-    instance = new BatchRecoveryService(config);
+    instance = new BatchRecoveryService(config, leaderElection, queueService);
+  } else if (queueService && !instance["queueService"]) {
+    // Allow setting queue service after initial creation
+    instance.setQueueService(queueService);
   }
   return instance;
 }

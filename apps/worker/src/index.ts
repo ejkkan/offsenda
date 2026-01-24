@@ -32,6 +32,9 @@ import { getBufferedLogger } from "./buffered-logger.js";
 import { getHotStateManager } from "./hot-state-manager.js";
 import { runPreflight } from "./preflight.js";
 
+// Worker lifecycle metrics
+import { workerStartupsTotal, workerStartTimestamp } from "./metrics.js";
+
 const app = Fastify({
   logger: false,  // We use our own structured logger
   bodyLimit: config.MAX_REQUEST_SIZE_BYTES, // Default is 1MB, we need up to 10MB for batch uploads
@@ -329,6 +332,10 @@ try {
   await app.listen({ port: config.PORT, host: "0.0.0.0" });
 
   const stats = await queueService.getQueueStats();
+
+  // Record worker startup metrics
+  workerStartupsTotal.inc();
+  workerStartTimestamp.set(Date.now() / 1000);
 
   // Log startup info
   log.system.info({
