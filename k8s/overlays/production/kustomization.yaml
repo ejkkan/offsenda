@@ -8,13 +8,13 @@ resources:
 images:
 - name: registry.localhost:5000/worker
   newName: ghcr.io/ejkkan/offsenda-worker
-  newTag: main-c67be05
+  newTag: main-1f1abf8
 - name: registry.localhost:5000/web
   newName: ghcr.io/ejkkan/offsenda-web
   newTag: main-6437ed5
 - name: registry.localhost:5000/migration
   newName: ghcr.io/ejkkan/offsenda-migration
-  newTag: main-c67be05
+  newTag: main-1f1abf8
 
 patches:
 # Exclude in-cluster PostgreSQL - using external database via DATABASE_URL
