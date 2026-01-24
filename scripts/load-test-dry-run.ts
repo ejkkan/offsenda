@@ -111,11 +111,15 @@ async function sendBatch(batchId: string) {
 }
 
 async function getBatchStatus(batchId: string) {
-  const response = await fetch(`${API_URL}/api/batches/${batchId}`, {
-    headers: {
-      "Authorization": `Bearer ${API_KEY}`,
-    },
-  });
+  const headers: Record<string, string> = {
+    "Authorization": `Bearer ${API_KEY}`,
+  };
+  // Add admin secret to bypass rate limiting during stress tests
+  if (ADMIN_SECRET) {
+    headers["X-Admin-Secret"] = ADMIN_SECRET;
+  }
+
+  const response = await fetch(`${API_URL}/api/batches/${batchId}`, { headers });
 
   if (!response.ok) {
     throw new Error(`Failed to get batch: ${response.status}`);
