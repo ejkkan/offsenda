@@ -7,13 +7,25 @@ describe("RateLimiterService", () => {
   let redis: Redis;
 
   beforeAll(() => {
-    rateLimiter = new RateLimiterService();
+    // Create separate Redis instances for cleanup and rate limiting
+    // Both must explicitly use localhost since config defaults to k8s service names
     redis = new Redis({ host: "localhost", port: 6379 });
+    const rateLimiterRedis = new Redis({ host: "localhost", port: 6379 });
+    rateLimiter = new RateLimiterService(rateLimiterRedis);
   });
 
   afterAll(async () => {
-    await rateLimiter.close();
-    await redis.quit();
+    // Graceful cleanup - ignore errors if already closed
+    try {
+      await rateLimiter.close();
+    } catch {
+      // Ignore cleanup errors
+    }
+    try {
+      await redis.quit();
+    } catch {
+      // Ignore cleanup errors
+    }
   });
 
   beforeEach(async () => {

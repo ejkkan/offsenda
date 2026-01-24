@@ -76,15 +76,13 @@ export interface ProviderLimits {
  * System-defined provider limits (based on provider capabilities)
  */
 export const PROVIDER_LIMITS: Record<string, ProviderLimits> = {
-  // Email providers
+  // Email providers (platform services)
   ses: { maxBatchSize: 50, maxRequestsPerSecond: 14 },       // AWS SES SendBulkEmail limit
   resend: { maxBatchSize: 100, maxRequestsPerSecond: 100 },  // Resend batch API
-  // SMS providers
+  // SMS providers (platform services)
   telnyx: { maxBatchSize: 1, maxRequestsPerSecond: 50 },     // SMS is typically 1:1
-  // Webhooks - user configurable, these are defaults
+  // Webhooks (BYOK) - user configurable, these are defaults
   webhook: { maxBatchSize: 100, maxRequestsPerSecond: 100 },
-  // Mock provider for testing
-  mock: { maxBatchSize: 100, maxRequestsPerSecond: 10000 },
 };
 
 /**

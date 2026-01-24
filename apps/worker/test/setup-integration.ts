@@ -72,8 +72,6 @@ export async function setup() {
     process.env.CLICKHOUSE_PASSWORD = "test";
     process.env.CLICKHOUSE_DATABASE = "batchsender_test";
 
-    // IMPORTANT: Always use mock email provider in tests
-    process.env.EMAIL_PROVIDER = "mock";
     process.env.NODE_ENV = "test";
 
     // Clean up any existing services

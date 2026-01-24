@@ -55,6 +55,7 @@ describe("E2E: Basic Batch Flow", () => {
         { email: "user2@test.local", name: "User Two" },
         { email: "user3@test.local", name: "User Three" },
       ],
+      dryRun: true,
     });
 
     expect(batchId).toBeDefined();
@@ -198,6 +199,7 @@ describe("E2E: Basic Batch Flow", () => {
           variables: { code: "XYZ789" },
         },
       ],
+      dryRun: true,
     });
 
     // Start sending

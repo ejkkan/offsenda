@@ -96,11 +96,9 @@ async function start() {
   log.system.info({
     service: "batch-processor",
     port: config.PORT,
-    concurrentBatches: config.CONCURRENT_BATCHES,
   }, "batch-processor started");
 
   printBanner("Batch Processor", {
-    "Concurrent Batches": config.CONCURRENT_BATCHES,
     "NATS": config.NATS_CLUSTER,
   });
 }

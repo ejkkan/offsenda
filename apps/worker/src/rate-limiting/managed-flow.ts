@@ -1,49 +1,42 @@
 /**
  * Managed Flow Context Builder
  *
- * Builds rate limiter context for managed mode where users share
- * BatchSender's provider accounts (SES, Resend, Telnyx).
+ * Builds rate limiter context for platform services where users use
+ * BatchSender's managed provider accounts (SES, Resend, Telnyx).
  *
  * Rate limit composition: MIN(system, managed_provider, tier, sendConfig)
- * All managed users SHARE the provider limit.
+ * All users using the same service SHARE the provider limit.
  */
 
 import type { EmailModuleConfig, SmsModuleConfig } from "@batchsender/db";
 import type { RateLimiterContext, ManagedProvider, ModuleType } from "./types.js";
-import { config } from "../config.js";
 
 /**
- * Determine the managed provider for email based on environment config
+ * Get the managed provider from email config
  */
-function getManagedEmailProvider(): ManagedProvider {
-  const provider = config.EMAIL_PROVIDER;
-  if (provider === "ses" || provider === "resend" || provider === "mock") {
-    return provider;
-  }
-  return "resend"; // Default fallback
+function getEmailServiceProvider(moduleConfig: EmailModuleConfig): ManagedProvider {
+  return moduleConfig.service;
 }
 
 /**
- * Determine the managed provider for SMS based on environment config
+ * Get the managed provider from SMS config
+ * Currently only Telnyx is supported
  */
-function getManagedSmsProvider(): ManagedProvider {
-  const provider = config.SMS_PROVIDER;
-  if (provider === "telnyx" || provider === "mock") {
-    return provider;
-  }
-  return "telnyx"; // Default fallback
+function getSmsServiceProvider(_moduleConfig: SmsModuleConfig): ManagedProvider {
+  return "telnyx";
 }
 
 /**
  * Build rate limiter context for managed email flow
  */
 export function buildManagedEmailContext(
+  moduleConfig: EmailModuleConfig,
   sendConfigId: string,
   userId: string
 ): RateLimiterContext {
   return {
     mode: "managed",
-    provider: getManagedEmailProvider(),
+    provider: getEmailServiceProvider(moduleConfig),
     module: "email",
     sendConfigId,
     userId,
@@ -54,12 +47,13 @@ export function buildManagedEmailContext(
  * Build rate limiter context for managed SMS flow
  */
 export function buildManagedSmsContext(
+  moduleConfig: SmsModuleConfig,
   sendConfigId: string,
   userId: string
 ): RateLimiterContext {
   return {
     mode: "managed",
-    provider: getManagedSmsProvider(),
+    provider: getSmsServiceProvider(moduleConfig),
     module: "sms",
     sendConfigId,
     userId,
@@ -71,28 +65,28 @@ export function buildManagedSmsContext(
  */
 export function buildManagedContext(
   module: ModuleType,
+  moduleConfig: EmailModuleConfig | SmsModuleConfig,
   sendConfigId: string,
   userId: string
 ): RateLimiterContext {
   if (module === "email") {
-    return buildManagedEmailContext(sendConfigId, userId);
+    return buildManagedEmailContext(moduleConfig as EmailModuleConfig, sendConfigId, userId);
   }
-  return buildManagedSmsContext(sendConfigId, userId);
+  return buildManagedSmsContext(moduleConfig as SmsModuleConfig, sendConfigId, userId);
 }
 
 /**
- * Check if an email config is in managed mode
+ * Email and SMS modules are always in managed mode now
+ * (BYOK is handled via the Webhook module)
  */
-export function isEmailManagedMode(moduleConfig: EmailModuleConfig): boolean {
-  return moduleConfig.mode === "managed";
+export function isEmailManagedMode(_moduleConfig: EmailModuleConfig): boolean {
+  return true;
 }
 
 /**
- * Check if an SMS config is in managed mode
- * For backward compatibility: configs without mode field are considered BYOK
- * since they must specify provider credentials
+ * Email and SMS modules are always in managed mode now
+ * (BYOK is handled via the Webhook module)
  */
-export function isSmsManagedMode(moduleConfig: SmsModuleConfig): boolean {
-  const cfg = moduleConfig as SmsModuleConfig & { mode?: string };
-  return cfg.mode === "managed";
+export function isSmsManagedMode(_moduleConfig: SmsModuleConfig): boolean {
+  return true;
 }

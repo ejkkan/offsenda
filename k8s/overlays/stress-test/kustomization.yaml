@@ -22,7 +22,7 @@ patches:
             value: "5000"
           - name: CONCURRENT_BATCHES
             value: "500"
-          - name: HIGH_THROUGHPUT_TEST_MODE
+          - name: DISABLE_RATE_LIMIT
             value: "true"
           - name: MOCK_LATENCY_MS
             value: "500"

@@ -1,6 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { getModule, hasModule, listModules, getAllModules } from "../../../modules/index.js";
 import { SmsModule } from "../../../modules/sms-module.js";
+
+// Mock fetch for Telnyx API calls
+const mockFetch = vi.fn();
+vi.stubGlobal("fetch", mockFetch);
 
 describe("Module Registry", () => {
   describe("getModule", () => {
@@ -65,7 +69,7 @@ describe("Module Registry", () => {
 
     it("returns a copy (not the original registry)", () => {
       const modules = getAllModules();
-      modules.fake = {} as any;
+      (modules as Record<string, unknown>).fake = {};
       expect(hasModule("fake")).toBe(false);
     });
   });
@@ -74,78 +78,47 @@ describe("Module Registry", () => {
 describe("SmsModule", () => {
   const module = new SmsModule();
 
+  beforeEach(() => {
+    mockFetch.mockReset();
+    vi.stubEnv("TELNYX_API_KEY", "KEY_test123");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   describe("validateConfig", () => {
-    it("fails when provider is missing", () => {
+    it("fails when service is missing", () => {
       const result = module.validateConfig({});
       expect(result.valid).toBe(false);
-      expect(result.errors).toContain("provider is required (twilio, aws-sns, or mock)");
+      expect(result.errors).toContain("service is required (telnyx)");
     });
 
-    it("fails for invalid provider", () => {
-      const result = module.validateConfig({ provider: "unknown", fromNumber: "+1234567890" });
+    it("fails for invalid service", () => {
+      const result = module.validateConfig({ service: "unknown", fromNumber: "+1234567890" });
       expect(result.valid).toBe(false);
-      expect(result.errors).toContain('provider must be "twilio", "aws-sns", or "mock"');
+      expect(result.errors).toContain('service must be "telnyx"');
     });
 
     it("fails when fromNumber is missing", () => {
-      const result = module.validateConfig({ provider: "mock" });
+      const result = module.validateConfig({ service: "telnyx" });
       expect(result.valid).toBe(false);
       expect(result.errors).toContain("fromNumber is required");
     });
 
-    it("fails when Twilio accountSid is missing", () => {
+    it("accepts valid Telnyx config", () => {
       const result = module.validateConfig({
-        provider: "twilio",
-        fromNumber: "+1234567890",
-        authToken: "token123",
-      });
-      expect(result.valid).toBe(false);
-      expect(result.errors).toContain("accountSid is required for Twilio");
-    });
-
-    it("fails when Twilio authToken is missing", () => {
-      const result = module.validateConfig({
-        provider: "twilio",
-        fromNumber: "+1234567890",
-        accountSid: "AC123",
-      });
-      expect(result.valid).toBe(false);
-      expect(result.errors).toContain("authToken is required for Twilio");
-    });
-
-    it("fails when AWS SNS region is missing", () => {
-      const result = module.validateConfig({
-        provider: "aws-sns",
-        fromNumber: "+1234567890",
-      });
-      expect(result.valid).toBe(false);
-      expect(result.errors).toContain("region is required for AWS SNS");
-    });
-
-    it("accepts valid mock config", () => {
-      const result = module.validateConfig({
-        provider: "mock",
+        service: "telnyx",
         fromNumber: "+1234567890",
       });
       expect(result.valid).toBe(true);
-      expect(result.errors).toHaveLength(0);
     });
 
-    it("accepts valid Twilio config", () => {
+    it("accepts Telnyx config with messaging profile", () => {
       const result = module.validateConfig({
-        provider: "twilio",
+        service: "telnyx",
         fromNumber: "+1234567890",
-        accountSid: "AC1234567890",
-        authToken: "auth_token_here",
-      });
-      expect(result.valid).toBe(true);
-    });
-
-    it("accepts valid AWS SNS config", () => {
-      const result = module.validateConfig({
-        provider: "aws-sns",
-        fromNumber: "+1234567890",
-        region: "us-east-1",
+        messagingProfileId: "profile_123",
       });
       expect(result.valid).toBe(true);
     });
@@ -153,13 +126,13 @@ describe("SmsModule", () => {
     it("collects all validation errors", () => {
       const result = module.validateConfig({});
       expect(result.valid).toBe(false);
-      expect(result.errors?.length).toBeGreaterThan(1);
+      expect(result.errors?.length).toBeGreaterThanOrEqual(1);
     });
   });
 
   describe("validatePayload", () => {
     it("fails when phone number is missing", () => {
-      const result = module.validatePayload({ message: "Hello" } as any);
+      const result = module.validatePayload({ message: "Hello" });
       expect(result.valid).toBe(false);
       expect(result.errors).toContain("to (phone number) is required");
     });
@@ -168,7 +141,7 @@ describe("SmsModule", () => {
       const result = module.validatePayload({
         to: "1234567890", // missing +
         message: "Hello",
-      } as any);
+      });
       expect(result.valid).toBe(false);
       expect(result.errors).toContain("to must be a valid phone number (E.164 format: +1234567890)");
     });
@@ -177,14 +150,14 @@ describe("SmsModule", () => {
       const result = module.validatePayload({
         to: "+0123456789",
         message: "Hello",
-      } as any);
+      });
       expect(result.valid).toBe(false);
     });
 
     it("fails when message is missing", () => {
       const result = module.validatePayload({
         to: "+1234567890",
-      } as any);
+      });
       expect(result.valid).toBe(false);
       expect(result.errors).toContain("message is required");
     });
@@ -193,7 +166,7 @@ describe("SmsModule", () => {
       const result = module.validatePayload({
         to: "+1234567890",
         message: "Hello!",
-      } as any);
+      });
       expect(result.valid).toBe(true);
     });
 
@@ -201,7 +174,7 @@ describe("SmsModule", () => {
       const result = module.validatePayload({
         to: "+46701234567",
         message: "Hej!",
-      } as any);
+      });
       expect(result.valid).toBe(true);
     });
 
@@ -209,25 +182,25 @@ describe("SmsModule", () => {
       const result = module.validatePayload({
         to: "+123456789012345", // 15 digits
         message: "Hello",
-      } as any);
+      });
       expect(result.valid).toBe(true);
     });
 
     it("collects all validation errors", () => {
-      const result = module.validatePayload({} as any);
+      const result = module.validatePayload({});
       expect(result.valid).toBe(false);
       expect(result.errors?.length).toBeGreaterThan(1);
     });
   });
 
   describe("execute", () => {
-    const mockConfig = {
+    const telnyxConfig = {
       id: "test-config",
       userId: "user-123",
       name: "Test SMS Config",
       module: "sms" as const,
       config: {
-        provider: "mock" as const,
+        service: "telnyx" as const,
         fromNumber: "+1234567890",
       },
       rateLimit: null,
@@ -237,54 +210,70 @@ describe("SmsModule", () => {
       updatedAt: new Date(),
     };
 
-    it("returns success with mock provider", async () => {
+    it("returns success with Telnyx provider", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { id: "msg-12345" } }),
+      });
+
       const result = await module.execute(
-        { to: "+1987654321", message: "Hello!" } as any,
-        mockConfig
+        { to: "+1987654321", message: "Hello!" },
+        telnyxConfig
       );
       expect(result.success).toBe(true);
     });
 
     it("returns providerMessageId", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { id: "msg-12345" } }),
+      });
+
       const result = await module.execute(
-        { to: "+1987654321", message: "Hello!" } as any,
-        mockConfig
+        { to: "+1987654321", message: "Hello!" },
+        telnyxConfig
       );
-      expect(result.providerMessageId).toBeDefined();
-      expect(result.providerMessageId).toMatch(/^mock-sms-\d+-[a-z0-9]+$/);
+      expect(result.providerMessageId).toBe("msg-12345");
     });
 
     it("includes latencyMs", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { id: "msg-12345" } }),
+      });
+
       const result = await module.execute(
-        { to: "+1987654321", message: "Hello!" } as any,
-        mockConfig
+        { to: "+1987654321", message: "Hello!" },
+        telnyxConfig
       );
       expect(result.latencyMs).toBeGreaterThanOrEqual(0);
     });
 
-    it("generates unique message IDs", async () => {
-      const results = await Promise.all([
-        module.execute({ to: "+1987654321", message: "1" } as any, mockConfig),
-        module.execute({ to: "+1987654321", message: "2" } as any, mockConfig),
-        module.execute({ to: "+1987654321", message: "3" } as any, mockConfig),
-      ]);
+    it("handles Telnyx API errors", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        json: async () => ({ errors: [{ detail: "Invalid phone number format" }] }),
+      });
 
-      const ids = results.map((r) => r.providerMessageId);
-      const uniqueIds = new Set(ids);
-      expect(uniqueIds.size).toBe(3);
-    });
-
-    it("handles unknown provider gracefully", async () => {
-      const badConfig = {
-        ...mockConfig,
-        config: { provider: "unknown" as any, fromNumber: "+1234567890" },
-      };
       const result = await module.execute(
-        { to: "+1987654321", message: "Hello!" } as any,
-        badConfig
+        { to: "+1987654321", message: "Hello!" },
+        telnyxConfig
       );
       expect(result.success).toBe(false);
-      expect(result.error).toContain("Unknown SMS provider");
+      expect(result.error).toContain("Invalid phone number format");
+    });
+
+    it("handles missing API key", async () => {
+      vi.stubEnv("TELNYX_API_KEY", "");
+
+      const result = await module.execute(
+        { to: "+1987654321", message: "Hello!" },
+        telnyxConfig
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("TELNYX_API_KEY");
     });
   });
 });

@@ -66,21 +66,10 @@ export const configSchema = z.object({
   HOT_STATE_ACTIVE_TTL_DAYS: z.coerce.number().default(7),
 
   // ===========================================================================
-  // Concurrency & Throughput
-  // Applies to ALL modules (email, SMS, etc.) - a request is a request
+  // Rate Limiting
   // ===========================================================================
-  /** Total concurrent outbound requests per worker (all modules) */
-  MAX_CONCURRENT_REQUESTS: z.coerce.number().default(200),
-  /** Parallel batch processing */
-  CONCURRENT_BATCHES: z.coerce.number().default(50),
-  /** Messages to fetch per poll */
-  BATCH_SIZE: z.coerce.number().default(100),
-  /** Poll interval when queue is empty */
-  POLL_INTERVAL_MS: z.coerce.number().default(2000),
-  /** System-wide rate limit (all requests) */
-  SYSTEM_RATE_LIMIT: z.coerce.number().default(10000),
-  /** Per-user rate limit */
-  RATE_LIMIT_PER_SECOND: z.coerce.number().default(1000),
+  /** System-wide rate limit ceiling (all requests across all users) */
+  SYSTEM_RATE_LIMIT: z.coerce.number().default(100000),
 
   // ===========================================================================
   // Provider Rate Limits (Managed Mode)
@@ -91,14 +80,6 @@ export const configSchema = z.object({
   MANAGED_RESEND_RATE_LIMIT: z.coerce.number().default(100),
   // SMS providers
   MANAGED_TELNYX_RATE_LIMIT: z.coerce.number().default(50),
-  // Testing
-  MANAGED_MOCK_RATE_LIMIT: z.coerce.number().default(50000),
-
-  // ===========================================================================
-  // Provider Selection
-  // ===========================================================================
-  EMAIL_PROVIDER: z.enum(["resend", "ses", "mock"]).default("resend"),
-  SMS_PROVIDER: z.enum(["telnyx", "mock"]).default("mock"),
 
   // ===========================================================================
   // Provider Credentials
@@ -112,13 +93,6 @@ export const configSchema = z.object({
   SES_ENDPOINT: z.string().url().optional(),
   // Telnyx
   TELNYX_WEBHOOK_SECRET: z.string().optional(),
-
-  // ===========================================================================
-  // Mock Provider (for testing)
-  // ===========================================================================
-  MOCK_MODE: z.enum(["success", "fail", "random"]).default("success"),
-  MOCK_FAILURE_RATE: z.coerce.number().min(0).max(1).default(0.1),
-  MOCK_LATENCY_MS: z.coerce.number().default(50),
 
   // ===========================================================================
   // Webhooks (Inbound from providers)
@@ -175,7 +149,6 @@ export const configSchema = z.object({
   TEST_ADMIN_SECRET: z.string().default("test-admin-secret"),
   ENABLE_TEST_SETUP_API: z.string().optional(),
   ENABLE_WEBHOOK_SIMULATOR: z.string().optional(),
-  HIGH_THROUGHPUT_TEST_MODE: stringBoolean.default(false),
   /** Minimum simulated latency for dry run mode (ms) */
   DRY_RUN_LATENCY_MIN_MS: z.coerce.number().default(50),
   /** Maximum simulated latency for dry run mode (ms) */

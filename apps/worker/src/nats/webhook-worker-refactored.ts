@@ -63,9 +63,7 @@ export class NatsWebhookWorkerRefactored {
       await this.ensureConsumer();
 
       const consumer = await js.consumers.get("webhooks", "webhook-processor");
-      const messages = await consumer.consume({
-        max_messages: 1000, // Process up to 1000 messages concurrently
-      });
+      const messages = await consumer.consume();
 
       log.system.info("Webhook processor started");
 
@@ -98,7 +96,7 @@ export class NatsWebhookWorkerRefactored {
         ack_policy: AckPolicy.Explicit,
         max_deliver: 3,
         ack_wait: 30_000, // 30 seconds
-        max_ack_pending: 1000,
+        max_ack_pending: -1,
       });
       log.system.info("Created webhook-processor consumer");
     }

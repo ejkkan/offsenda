@@ -352,10 +352,6 @@ export async function registerWebhooks(
             pending: queueStats.email.pending,
             consumers: queueStats.email.consumers,
           },
-          priority: {
-            pending: queueStats.priority.pending,
-            consumers: queueStats.priority.consumers,
-          },
         },
       };
     } catch (error) {

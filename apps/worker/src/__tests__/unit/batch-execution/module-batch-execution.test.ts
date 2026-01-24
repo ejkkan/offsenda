@@ -2,7 +2,7 @@
  * Module Batch Execution Tests
  *
  * Tests the batch execution capabilities of each module:
- * - EmailModule: Uses Resend batch API
+ * - EmailModule: Uses Resend batch API or SES
  * - WebhookModule: Sends array of recipients in single POST
  * - SmsModule: Parallel individual calls with concurrency control
  */
@@ -49,16 +49,13 @@ describe("PROVIDER_LIMITS Configuration", () => {
     expect(PROVIDER_LIMITS.webhook.maxBatchSize).toBe(100);
     expect(PROVIDER_LIMITS.webhook.maxRequestsPerSecond).toBe(100);
   });
-
-  it("has correct limits for Mock (high throughput for testing)", () => {
-    expect(PROVIDER_LIMITS.mock.maxBatchSize).toBe(100);
-    expect(PROVIDER_LIMITS.mock.maxRequestsPerSecond).toBe(10000);
-  });
 });
 
 describe("EmailModule Batch Execution", () => {
   let emailModule: EmailModule;
-  let mockResendInstance: any;
+  let mockResendInstance: {
+    batch: { send: ReturnType<typeof vi.fn> };
+  };
 
   beforeEach(async () => {
     emailModule = new EmailModule();
@@ -70,7 +67,7 @@ describe("EmailModule Batch Execution", () => {
         send: vi.fn(),
       },
     };
-    vi.mocked(Resend).mockImplementation(() => mockResendInstance);
+    vi.mocked(Resend).mockImplementation(() => mockResendInstance as never);
   });
 
   afterEach(() => {
@@ -85,89 +82,16 @@ describe("EmailModule Batch Execution", () => {
     expect(typeof emailModule.executeBatch).toBe("function");
   });
 
-  describe("executeBatch with mock provider", () => {
-    const mockSendConfig: SendConfig = {
+  describe("executeBatch with Resend (platform service)", () => {
+    const resendConfig: SendConfig = {
       id: "config-123",
       userId: "user-456",
-      name: "Test Config",
+      name: "Resend Platform",
       module: "email",
       config: {
-        mode: "managed",
-        provider: "mock",
-      },
-      rateLimit: null,
-      isDefault: false,
-      isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    it("returns success for all recipients with mock provider", async () => {
-      // Set EMAIL_PROVIDER to mock
-      vi.stubEnv("EMAIL_PROVIDER", "mock");
-
-      const payloads: BatchJobPayload[] = [
-        {
-          recipientId: "r1",
-          payload: {
-            to: "user1@example.com",
-            fromEmail: "sender@example.com",
-            subject: "Test 1",
-            textContent: "Hello 1",
-          },
-        },
-        {
-          recipientId: "r2",
-          payload: {
-            to: "user2@example.com",
-            fromEmail: "sender@example.com",
-            subject: "Test 2",
-            textContent: "Hello 2",
-          },
-        },
-      ];
-
-      const results = await emailModule.executeBatch!(payloads, mockSendConfig);
-
-      expect(results).toHaveLength(2);
-      expect(results[0].recipientId).toBe("r1");
-      expect(results[0].result.success).toBe(true);
-      expect(results[0].result.providerMessageId).toMatch(/^mock-/);
-      expect(results[1].recipientId).toBe("r2");
-      expect(results[1].result.success).toBe(true);
-    });
-
-    it("includes latencyMs in results", async () => {
-      vi.stubEnv("EMAIL_PROVIDER", "mock");
-
-      const payloads: BatchJobPayload[] = [
-        {
-          recipientId: "r1",
-          payload: {
-            to: "user1@example.com",
-            fromEmail: "sender@example.com",
-            subject: "Test",
-            textContent: "Hello",
-          },
-        },
-      ];
-
-      const results = await emailModule.executeBatch!(payloads, mockSendConfig);
-
-      expect(results[0].result.latencyMs).toBeGreaterThanOrEqual(0);
-    });
-  });
-
-  describe("executeBatch with Resend BYOK", () => {
-    const resendBYOKConfig: SendConfig = {
-      id: "config-123",
-      userId: "user-456",
-      name: "Resend BYOK",
-      module: "email",
-      config: {
-        mode: "byok",
-        provider: "resend",
-        apiKey: "re_test_key_123",
+        service: "resend",
+        fromEmail: "sender@example.com",
+        fromName: "Sender Name",
       },
       rateLimit: null,
       isDefault: false,
@@ -204,7 +128,7 @@ describe("EmailModule Batch Execution", () => {
         },
       ];
 
-      const results = await emailModule.executeBatch!(payloads, resendBYOKConfig);
+      const results = await emailModule.executeBatch!(payloads, resendConfig);
 
       expect(mockResendInstance.batch.send).toHaveBeenCalledTimes(1);
       expect(results).toHaveLength(2);
@@ -232,7 +156,7 @@ describe("EmailModule Batch Execution", () => {
         },
       ];
 
-      const results = await emailModule.executeBatch!(payloads, resendBYOKConfig);
+      const results = await emailModule.executeBatch!(payloads, resendConfig);
 
       expect(results[0].result.success).toBe(false);
       expect(results[0].result.error).toBe("Rate limit exceeded");
@@ -255,21 +179,44 @@ describe("EmailModule Batch Execution", () => {
         },
       ];
 
-      const results = await emailModule.executeBatch!(payloads, resendBYOKConfig);
+      const results = await emailModule.executeBatch!(payloads, resendConfig);
 
       expect(results[0].result.success).toBe(true);
       expect(results[1].result.success).toBe(false);
       expect(results[1].result.error).toBe("No message ID returned");
     });
+
+    it("includes latencyMs in results", async () => {
+      mockResendInstance.batch.send.mockResolvedValue({
+        data: [{ id: "msg-1" }],
+        error: null,
+      });
+
+      const payloads: BatchJobPayload[] = [
+        {
+          recipientId: "r1",
+          payload: {
+            to: "user1@example.com",
+            fromEmail: "sender@example.com",
+            subject: "Test",
+            textContent: "Hello",
+          },
+        },
+      ];
+
+      const results = await emailModule.executeBatch!(payloads, resendConfig);
+
+      expect(results[0].result.latencyMs).toBeGreaterThanOrEqual(0);
+    });
   });
 
   describe("template variable substitution in batch", () => {
-    const mockConfig: SendConfig = {
+    const resendConfig: SendConfig = {
       id: "config-123",
       userId: "user-456",
       name: "Test Config",
       module: "email",
-      config: { mode: "managed", provider: "mock" },
+      config: { service: "resend", fromEmail: "sender@example.com" },
       rateLimit: null,
       isDefault: false,
       isActive: true,
@@ -278,7 +225,10 @@ describe("EmailModule Batch Execution", () => {
     };
 
     it("applies template variables to each recipient", async () => {
-      vi.stubEnv("EMAIL_PROVIDER", "mock");
+      mockResendInstance.batch.send.mockResolvedValue({
+        data: [{ id: "msg-1" }, { id: "msg-2" }],
+        error: null,
+      });
 
       const payloads: BatchJobPayload[] = [
         {
@@ -304,7 +254,7 @@ describe("EmailModule Batch Execution", () => {
         },
       ];
 
-      const results = await emailModule.executeBatch!(payloads, mockConfig);
+      const results = await emailModule.executeBatch!(payloads, resendConfig);
 
       // Both should succeed (template processing happens internally)
       expect(results[0].result.success).toBe(true);
@@ -374,6 +324,12 @@ describe("SmsModule Batch Execution", () => {
   beforeEach(() => {
     smsModule = new SmsModule();
     mockFetch.mockReset();
+    // Set required env var for Telnyx
+    vi.stubEnv("TELNYX_API_KEY", "KEY_test123");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("has supportsBatch = true", () => {
@@ -384,41 +340,6 @@ describe("SmsModule Batch Execution", () => {
     expect(typeof smsModule.executeBatch).toBe("function");
   });
 
-  describe("executeBatch with mock provider", () => {
-    const mockConfig: SendConfig = {
-      id: "config-123",
-      userId: "user-456",
-      name: "SMS Mock Config",
-      module: "sms",
-      config: {
-        provider: "mock",
-        fromNumber: "+1234567890",
-      },
-      rateLimit: null,
-      isDefault: false,
-      isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    it("returns success for all recipients", async () => {
-      const payloads: BatchJobPayload[] = [
-        { recipientId: "r1", payload: { to: "+1111111111", message: "Hello 1" } },
-        { recipientId: "r2", payload: { to: "+2222222222", message: "Hello 2" } },
-        { recipientId: "r3", payload: { to: "+3333333333", message: "Hello 3" } },
-      ];
-
-      const results = await smsModule.executeBatch!(payloads, mockConfig);
-
-      expect(results).toHaveLength(3);
-      results.forEach((r, i) => {
-        expect(r.recipientId).toBe(`r${i + 1}`);
-        expect(r.result.success).toBe(true);
-        expect(r.result.providerMessageId).toMatch(/^mock-sms-/);
-      });
-    });
-  });
-
   describe("executeBatch with Telnyx (parallel individual calls)", () => {
     const telnyxConfig: SendConfig = {
       id: "config-123",
@@ -426,9 +347,8 @@ describe("SmsModule Batch Execution", () => {
       name: "Telnyx Config",
       module: "sms",
       config: {
-        provider: "telnyx",
+        service: "telnyx",
         fromNumber: "+1234567890",
-        apiKey: "KEY_test123",
       },
       rateLimit: null,
       isDefault: false,
@@ -439,12 +359,10 @@ describe("SmsModule Batch Execution", () => {
 
     it("makes parallel individual API calls", async () => {
       // Track call order
-      const callOrder: number[] = [];
       let callCount = 0;
 
       mockFetch.mockImplementation(async () => {
         const myCallNum = ++callCount;
-        callOrder.push(myCallNum);
         // Simulate some latency
         await new Promise((r) => setTimeout(r, 10));
         return {
@@ -562,7 +480,7 @@ describe("Batch Execution Edge Cases", () => {
         userId: "u1",
         name: "Test",
         module: "email",
-        config: { mode: "managed", provider: "mock" },
+        config: { service: "resend", fromEmail: "sender@example.com" },
         rateLimit: null,
         isDefault: false,
         isActive: true,
@@ -589,7 +507,7 @@ describe("Batch Execution Edge Cases", () => {
         userId: "u1",
         name: "Test",
         module: "sms",
-        config: { provider: "mock", fromNumber: "+1234567890" },
+        config: { service: "telnyx", fromNumber: "+1234567890" },
         rateLimit: null,
         isDefault: false,
         isActive: true,
@@ -605,14 +523,25 @@ describe("Batch Execution Edge Cases", () => {
   describe("Single recipient batch", () => {
     it("processes single recipient correctly", async () => {
       const module = new EmailModule();
-      vi.stubEnv("EMAIL_PROVIDER", "mock");
+
+      // Mock Resend for single recipient
+      const { Resend } = await import("resend");
+      const mockInstance = {
+        batch: {
+          send: vi.fn().mockResolvedValue({
+            data: [{ id: "msg-1" }],
+            error: null,
+          }),
+        },
+      };
+      vi.mocked(Resend).mockImplementation(() => mockInstance as never);
 
       const config: SendConfig = {
         id: "c1",
         userId: "u1",
         name: "Test",
         module: "email",
-        config: { mode: "managed", provider: "mock" },
+        config: { service: "resend", fromEmail: "sender@example.com" },
         rateLimit: null,
         isDefault: false,
         isActive: true,
@@ -642,13 +571,20 @@ describe("Batch Execution Edge Cases", () => {
 
   describe("Large batch handling", () => {
     it("handles 100 recipients in single batch", async () => {
+      vi.stubEnv("TELNYX_API_KEY", "KEY_test123");
+
       const module = new SmsModule();
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: { id: "msg-1" } }),
+      });
+
       const config: SendConfig = {
         id: "c1",
         userId: "u1",
         name: "Test",
         module: "sms",
-        config: { provider: "mock", fromNumber: "+1234567890" },
+        config: { service: "telnyx", fromNumber: "+1234567890" },
         rateLimit: null,
         isDefault: false,
         isActive: true,
@@ -671,6 +607,8 @@ describe("Batch Execution Edge Cases", () => {
         expect(r.recipientId).toBe(`r${i}`);
         expect(r.result.success).toBe(true);
       });
+
+      vi.unstubAllEnvs();
     });
   });
 });

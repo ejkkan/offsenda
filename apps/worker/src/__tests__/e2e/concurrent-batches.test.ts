@@ -65,6 +65,7 @@ describe("E2E: Concurrent Batch Processing", () => {
           fromEmail: "test@batchsender.local",
           recipients: generateRecipients(EMAILS_PER_BATCH),
           autoSend: true,
+          dryRun: true,
         });
         return id;
       })
@@ -129,6 +130,7 @@ describe("E2E: Concurrent Batch Processing", () => {
       fromEmail: "user1@batchsender.local",
       recipients: generateRecipients(EMAILS_PER_BATCH),
       autoSend: true,
+      dryRun: true,
     });
     const batch2 = await createBatch({
       name: "User 1 Batch B",
@@ -136,6 +138,7 @@ describe("E2E: Concurrent Batch Processing", () => {
       fromEmail: "user1@batchsender.local",
       recipients: generateRecipients(EMAILS_PER_BATCH),
       autoSend: true,
+      dryRun: true,
     });
 
     // Switch to user2 and create their batches
@@ -146,6 +149,7 @@ describe("E2E: Concurrent Batch Processing", () => {
       fromEmail: "user2@batchsender.local",
       recipients: generateRecipients(EMAILS_PER_BATCH),
       autoSend: true,
+      dryRun: true,
     });
     const batch4 = await createBatch({
       name: "User 2 Batch B",
@@ -153,6 +157,7 @@ describe("E2E: Concurrent Batch Processing", () => {
       fromEmail: "user2@batchsender.local",
       recipients: generateRecipients(EMAILS_PER_BATCH),
       autoSend: true,
+      dryRun: true,
     });
 
     const batchIds = [batch1.id, batch2.id, batch3.id, batch4.id];
@@ -212,6 +217,7 @@ describe("E2E: Concurrent Batch Processing", () => {
           fromEmail: "test@batchsender.local",
           recipients: generateRecipients(EMAILS_PER_BATCH),
           autoSend: true,
+          dryRun: true,
         });
         return id;
       })

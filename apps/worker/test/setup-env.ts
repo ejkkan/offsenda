@@ -16,11 +16,10 @@ process.env.CLICKHOUSE_URL = process.env.CLICKHOUSE_URL || "http://localhost:812
 process.env.CLICKHOUSE_USER = process.env.CLICKHOUSE_USER || "test";
 process.env.CLICKHOUSE_PASSWORD = process.env.CLICKHOUSE_PASSWORD || "test";
 process.env.CLICKHOUSE_DATABASE = process.env.CLICKHOUSE_DATABASE || "batchsender_test";
-process.env.DRAGONFLY_URL = process.env.DRAGONFLY_URL || "localhost:6380";
-process.env.DRAGONFLY_CRITICAL_URL = process.env.DRAGONFLY_CRITICAL_URL || "localhost:6380";
-process.env.DRAGONFLY_AUXILIARY_URL = process.env.DRAGONFLY_AUXILIARY_URL || "localhost:6380";
+process.env.DRAGONFLY_URL = process.env.DRAGONFLY_URL || "localhost:6379";
+process.env.DRAGONFLY_CRITICAL_URL = process.env.DRAGONFLY_CRITICAL_URL || "localhost:6379";
+process.env.DRAGONFLY_AUXILIARY_URL = process.env.DRAGONFLY_AUXILIARY_URL || "localhost:6379";
 process.env.WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "test-webhook-secret";
-process.env.EMAIL_PROVIDER = process.env.EMAIL_PROVIDER || "mock";
 process.env.NODE_ENV = "test";
 process.env.DISABLE_RATE_LIMIT = "true";
 

@@ -68,14 +68,9 @@ describe("configSchema defaults", () => {
   });
 
   describe("rate limiting defaults", () => {
-    it("should default SYSTEM_RATE_LIMIT to 10000", () => {
+    it("should default SYSTEM_RATE_LIMIT to 100000", () => {
       const config = configSchema.parse(requiredEnv);
-      expect(config.SYSTEM_RATE_LIMIT).toBe(10000);
-    });
-
-    it("should default RATE_LIMIT_PER_SECOND to 1000", () => {
-      const config = configSchema.parse(requiredEnv);
-      expect(config.RATE_LIMIT_PER_SECOND).toBe(1000);
+      expect(config.SYSTEM_RATE_LIMIT).toBe(100000);
     });
   });
 

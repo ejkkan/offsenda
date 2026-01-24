@@ -33,24 +33,6 @@ export const LIMITS = {
   maxSendConfigsPerUser: 20,
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PROVIDER DEFAULTS (used when user doesn't specify rate limit)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  providerDefaults: {
-    /** AWS SES default rate (sandbox-safe) */
-    ses: { perSecond: 14 },
-
-    /** Resend default rate */
-    resend: { perSecond: 100 },
-
-    /** Webhook default rate (conservative) */
-    webhook: { perSecond: 50 },
-
-    /** Managed email (our infrastructure) */
-    managed: { perSecond: 100 },
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════════
   // RATE LIMIT BOUNDS (for validating user-configured limits)
   // ═══════════════════════════════════════════════════════════════════════════
 

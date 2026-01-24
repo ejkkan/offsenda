@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SmsModule } from "../../../modules/sms-module.js";
 import type { SendConfig } from "@batchsender/db";
 
@@ -14,14 +14,16 @@ describe("Telnyx SMS Integration", () => {
     vi.clearAllMocks();
     smsModule = new SmsModule();
 
+    // Set TELNYX_API_KEY env var (platform-managed)
+    vi.stubEnv("TELNYX_API_KEY", "KEY01234567890ABCDEF");
+
     mockSendConfig = {
       id: "test-config",
       userId: "user-123",
       name: "Telnyx SMS",
       module: "sms",
       config: {
-        provider: "telnyx",
-        apiKey: "KEY01234567890ABCDEF",
+        service: "telnyx",
         fromNumber: "+15551234567",
         messagingProfileId: "profile-123",
       },
@@ -45,11 +47,14 @@ describe("Telnyx SMS Integration", () => {
     });
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   describe("Configuration Validation", () => {
     it("validates valid Telnyx config", () => {
       const result = smsModule.validateConfig({
-        provider: "telnyx",
-        apiKey: "KEY123",
+        service: "telnyx",
         fromNumber: "+15551234567",
       });
       expect(result.valid).toBe(true);
@@ -58,27 +63,24 @@ describe("Telnyx SMS Integration", () => {
 
     it("validates Telnyx config with messaging profile", () => {
       const result = smsModule.validateConfig({
-        provider: "telnyx",
-        apiKey: "KEY123",
+        service: "telnyx",
         fromNumber: "+15551234567",
         messagingProfileId: "profile-123",
       });
       expect(result.valid).toBe(true);
     });
 
-    it("rejects Telnyx config without API key", () => {
+    it("rejects config without service", () => {
       const result = smsModule.validateConfig({
-        provider: "telnyx",
         fromNumber: "+15551234567",
       });
       expect(result.valid).toBe(false);
-      expect(result.errors).toContain("apiKey is required for Telnyx");
+      expect(result.errors).toContain("service is required (telnyx)");
     });
 
     it("rejects config without fromNumber", () => {
       const result = smsModule.validateConfig({
-        provider: "telnyx",
-        apiKey: "KEY123",
+        service: "telnyx",
       });
       expect(result.valid).toBe(false);
       expect(result.errors).toContain("fromNumber is required");
@@ -155,7 +157,7 @@ describe("Telnyx SMS Integration", () => {
       });
 
       const payload = {
-        to: "+invalid",
+        to: "+15559876543",
         message: "Test message",
       };
 
@@ -194,7 +196,7 @@ describe("Telnyx SMS Integration", () => {
 
   describe("Webhook URL Configuration", () => {
     it("includes webhook URLs when environment variable is set", async () => {
-      process.env.WEBHOOK_BASE_URL = "https://example.com";
+      vi.stubEnv("WEBHOOK_BASE_URL", "https://example.com");
 
       const payload = {
         to: "+15559876543",
@@ -208,13 +210,12 @@ describe("Telnyx SMS Integration", () => {
 
       expect(body.webhook_url).toBe("https://example.com/api/webhooks/telnyx");
       expect(body.webhook_failover_url).toBe("https://example.com/api/webhooks/telnyx-failover");
-
-      delete process.env.WEBHOOK_BASE_URL;
     });
 
     it("omits webhook URLs when not configured", async () => {
-      delete process.env.WEBHOOK_BASE_URL;
-      delete process.env.TELNYX_WEBHOOK_URL;
+      // Ensure webhook vars are not set
+      vi.stubEnv("WEBHOOK_BASE_URL", "");
+      vi.stubEnv("TELNYX_WEBHOOK_URL", "");
 
       const payload = {
         to: "+15559876543",

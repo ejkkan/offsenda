@@ -125,7 +125,7 @@ export class NatsClient {
       try {
         await this.jsm!.streams.add({
           name: "email-system",
-          subjects: ["sys.batch.*", "email.user.*.send", "email.user.*.chunk", "email.priority.*"],
+          subjects: ["sys.batch.*", "email.user.*.send", "email.user.*.chunk"],
           retention: RetentionPolicy.Workqueue,
           storage: StorageType.File,
           num_replicas: config.NATS_REPLICAS,
@@ -150,7 +150,6 @@ export class NatsClient {
 
     // Create default consumers
     await this.ensureConsumer("batch-processor", "sys.batch.>");
-    await this.ensureConsumer("priority-processor", "email.priority.>");
   }
 
   private async ensureWebhookStream(): Promise<void> {
@@ -206,7 +205,7 @@ export class NatsClient {
           ack_policy: AckPolicy.Explicit,
           ack_wait: name === "batch-processor" ? 5 * 60 * 1e9 : 30 * 1e9, // 5 min for batch, 30s for others
           max_deliver: name === "batch-processor" ? 3 : 5,
-          max_ack_pending: name === "batch-processor" ? 200 : 1000, // Increased for high-throughput processing
+          max_ack_pending: -1, // Unlimited
           deliver_policy: DeliverPolicy.All,
           replay_policy: ReplayPolicy.Instant,
         });
@@ -241,7 +240,7 @@ export class NatsClient {
         ack_policy: AckPolicy.Explicit,
         ack_wait: 30 * 1e9, // 30 seconds
         max_deliver: 5,
-        max_ack_pending: 1000, // Allow 1000 in-flight messages per user for high throughput
+        max_ack_pending: -1, // Unlimited
         // Note: rate_limit_bps not supported for pull consumers
         inactive_threshold: 3600 * 1e9, // Auto-delete after 1 hour of inactivity
         deliver_policy: DeliverPolicy.All,

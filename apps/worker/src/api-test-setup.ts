@@ -340,7 +340,7 @@ export async function registerTestSetupApi(app: FastifyInstance): Promise<void> 
             userId: user.id,
             name: `${prefix}-test-config`,
             module: "email",
-            config: { mode: "managed" } as EmailModuleConfig, // Uses mock provider via EMAIL_PROVIDER env var
+            config: { service: "resend", fromEmail: "test@example.com" } as EmailModuleConfig,
             rateLimit: { perSecond: 5000 },
             isDefault: true,
             isActive: true,

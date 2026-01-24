@@ -258,14 +258,6 @@ try {
     process.exit(1);
   });
 
-  worker.startPriorityProcessor().catch((error) => {
-    const errorDetails = error instanceof Error
-      ? { message: error.message, name: error.name, stack: error.stack }
-      : { raw: String(error), type: typeof error };
-    log.system.error({ error: errorDetails }, "Priority processor crashed");
-    // Don't exit - priority emails are optional
-  });
-
   // Start existing user workers
   await worker.startExistingUserWorkers();
 
@@ -342,8 +334,6 @@ try {
   log.system.info({
     port: config.PORT,
     env: config.NODE_ENV,
-    concurrentBatches: config.CONCURRENT_BATCHES,
-    rateLimit: config.RATE_LIMIT_PER_SECOND,
     queueBatches: stats.batch.pending,
     queueEmails: stats.email.pending,
     natsCluster: config.NATS_CLUSTER,
@@ -356,7 +346,6 @@ try {
   BatchSender Worker Ready (NATS)
 ========================================
   http://localhost:${config.PORT}
-  Rate limit: ${config.RATE_LIMIT_PER_SECOND}/sec
   NATS Cluster: ${config.NATS_CLUSTER}
 ========================================
 `);

@@ -28,7 +28,7 @@ function getDefaultEmailConfig(): EmbeddedSendConfig {
   return {
     id: "default",
     module: "email",
-    config: { mode: "managed" } as EmailModuleConfig,
+    config: { mode: "managed", service: "ses" } as EmailModuleConfig,
     rateLimit: { perSecond: 100 },
   };
 }
@@ -47,7 +47,7 @@ export class NatsEmailWorker {
 
   private async startConsumerProcessor(consumerConfig: {
     consumerName: string;
-    maxMessages: number;
+    maxMessages?: number;
     onMessage: (msg: JsMsg) => Promise<void>;
     onError?: (msg: JsMsg, error: Error) => Promise<void>;
   }): Promise<void> {
@@ -68,7 +68,7 @@ export class NatsEmailWorker {
   private async runConsumerLoop(
     consumerConfig: {
       consumerName: string;
-      maxMessages: number;
+      maxMessages?: number;
       onMessage: (msg: JsMsg) => Promise<void>;
       onError?: (msg: JsMsg, error: Error) => Promise<void>;
     },
@@ -76,23 +76,17 @@ export class NatsEmailWorker {
   ): Promise<void> {
     try {
       const consumer = await js.consumers.get("email-system", consumerConfig.consumerName);
-      const messages = await consumer.consume({ max_messages: consumerConfig.maxMessages });
+      const messages = await consumer.consume(
+        consumerConfig.maxMessages ? { max_messages: consumerConfig.maxMessages } : undefined
+      );
 
-      log.system.info({ consumer: consumerConfig.consumerName, maxMessages: consumerConfig.maxMessages }, "Consumer processor started (parallel mode)");
+      log.system.info({ consumer: consumerConfig.consumerName }, "Consumer processor started (parallel mode)");
 
       // Track in-flight messages for graceful shutdown
       const inFlight = new Set<Promise<void>>();
 
-      // Backpressure limit to prevent memory exhaustion
-      const maxInFlight = config.MAX_CONCURRENT_REQUESTS || 1000;
-
       for await (const msg of messages) {
         if (this.isShuttingDown) break;
-
-        // Backpressure: wait if we've hit the limit before accepting more
-        if (inFlight.size >= maxInFlight) {
-          await Promise.race(inFlight);
-        }
 
         // Process message in parallel - don't await
         const processingPromise = (async () => {
@@ -139,7 +133,7 @@ export class NatsEmailWorker {
   async startBatchProcessor(): Promise<void> {
     return this.startConsumerProcessor({
       consumerName: "batch-processor",
-      maxMessages: config.CONCURRENT_BATCHES || 10,
+      // No maxMessages limit - let NATS max_ack_pending control throughput
       onMessage: (msg) => this.processBatchMessage(msg),
       onError: async (msg, error) => {
         // Handle backpressure (memory pressure) differently - delay longer to allow memory to free up
@@ -390,7 +384,7 @@ export class NatsEmailWorker {
     try {
       await this.startConsumerProcessor({
         consumerName: `user-${userId}`,
-        maxMessages: 1000, // Match max_ack_pending for optimal throughput
+        // No maxMessages limit - let NATS max_ack_pending control throughput
         onMessage: (msg) => this.processJobMessage(msg),
         onError: async (msg, error) => {
           log.email.error({ error, seq: msg.seq, userId }, "Failed to process user email");
@@ -505,7 +499,8 @@ export class NatsEmailWorker {
       });
 
       // Rate limiting (handles managed vs BYOK flows)
-      const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000);
+      // Pass dryRun flag - rate limiting is skipped for dry-run mode since no external providers are called
+      const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
       if (!rateLimitResult.allowed) {
         throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
       }
@@ -515,12 +510,10 @@ export class NatsEmailWorker {
       let result: JobResult;
 
       if (dryRun) {
-        // Use minimal latency in high-throughput test mode, otherwise simulate realistic provider delays
+        // Simulate realistic provider delays in dry run mode
         const minLatency = config.DRY_RUN_LATENCY_MIN_MS;
         const maxLatency = config.DRY_RUN_LATENCY_MAX_MS;
-        const simulatedLatency = config.HIGH_THROUGHPUT_TEST_MODE
-          ? 1
-          : minLatency + Math.random() * (maxLatency - minLatency);
+        const simulatedLatency = minLatency + Math.random() * (maxLatency - minLatency);
         if (simulatedLatency > 1) {
           await new Promise((resolve) => setTimeout(resolve, simulatedLatency));
         }
@@ -669,7 +662,8 @@ export class NatsEmailWorker {
       });
 
       // Rate limiting - acquire ONE token for this batch request
-      const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000);
+      // Pass dryRun flag - rate limiting is skipped for dry-run mode since no external providers are called
+      const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
       if (!rateLimitResult.allowed) {
         throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
       }
@@ -681,9 +675,7 @@ export class NatsEmailWorker {
         // Dry run - simulate success for all
         const minLatency = config.DRY_RUN_LATENCY_MIN_MS;
         const maxLatency = config.DRY_RUN_LATENCY_MAX_MS;
-        const simulatedLatency = config.HIGH_THROUGHPUT_TEST_MODE
-          ? 1
-          : minLatency + Math.random() * (maxLatency - minLatency);
+        const simulatedLatency = minLatency + Math.random() * (maxLatency - minLatency);
         if (simulatedLatency > 1) {
           await new Promise((resolve) => setTimeout(resolve, simulatedLatency));
         }
@@ -863,18 +855,6 @@ export class NatsEmailWorker {
     }, traceId);
   }
 
-  async startPriorityProcessor(): Promise<void> {
-    return this.startConsumerProcessor({
-      consumerName: "priority-processor",
-      maxMessages: 50,
-      onMessage: (msg) => this.processJobMessage(msg),
-      onError: async (msg, error) => {
-        log.email.error({ error, seq: msg.seq }, "Failed to process priority email");
-        await this.handleEmailFailure(msg, error as Error);
-      },
-    });
-  }
-
   async startExistingUserWorkers(): Promise<void> {
     const jsm = this.natsClient.getJetStreamManager();
 
@@ -882,7 +862,7 @@ export class NatsEmailWorker {
       const consumers = await jsm.consumers.list("email-system").next();
 
       for (const consumer of consumers) {
-        if (consumer.name === "batch-processor" || consumer.name === "priority-processor") {
+        if (consumer.name === "batch-processor") {
           continue;
         }
 

@@ -62,9 +62,9 @@ export interface IdempotencyChecker {
 export type RateLimitMode = "managed" | "byok";
 
 /**
- * Supported providers for managed mode
+ * Supported providers for managed mode (platform services)
  */
-export type ManagedProvider = "ses" | "resend" | "telnyx" | "mock";
+export type ManagedProvider = "ses" | "resend" | "telnyx";
 
 /**
  * Context for rate limit decisions

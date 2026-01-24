@@ -143,7 +143,6 @@ export interface QueueStats {
 export interface StreamStats {
   batch: QueueStats;
   email: QueueStats;
-  priority: QueueStats;
 }
 
 /**

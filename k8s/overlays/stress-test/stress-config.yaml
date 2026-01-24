@@ -28,10 +28,9 @@ data:
   # =============================================================================
   # Rate Limiting
   # =============================================================================
-  HIGH_THROUGHPUT_TEST_MODE: "true"   # Skip per-request rate checks
-  MANAGED_MOCK_RATE_LIMIT: "100000"   # 100k/s system limit
+  DISABLE_RATE_LIMIT: "true"          # Skip all rate limiting for stress tests
+  MANAGED_MOCK_RATE_LIMIT: "100000"   # 100k/s (only used if rate limiting enabled)
   SYSTEM_RATE_LIMIT: "100000"         # Match
-  RATE_LIMIT_PER_SECOND: "10000"      # Per-user limit
 
   # =============================================================================
   # Mock Provider (realistic latency)

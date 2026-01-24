@@ -281,67 +281,15 @@ export class NatsQueueService {
     };
   }
 
-  // Priority email operations
-  async enqueuePriorityEmail(email: EmailJobData): Promise<void> {
-    const msgID = `priority-${email.batchId}-${email.recipientId}`;
-
-    // Add traceId to NATS message headers for distributed tracing
-    const hdrs = natsHeaders();
-    const traceId = getTraceId();
-    if (traceId) {
-      hdrs.set("X-Trace-Id", traceId);
-    }
-
-    try {
-      const ack = await this.js.publish(
-        "email.priority.send",
-        this.sc.encode(JSON.stringify(email)),
-        {
-          msgID,
-          headers: hdrs,
-          expect: {
-            streamName: "email-system",
-          },
-        }
-      );
-
-      log.queue.info(
-        {
-          recipientId: email.recipientId,
-          to: email.email,
-          seq: ack.seq,
-          duplicate: ack.duplicate,
-        },
-        "priority email enqueued"
-      );
-    } catch (error) {
-      log.queue.error(
-        { error, recipientId: email.recipientId },
-        "failed to enqueue priority email"
-      );
-      throw error;
-    }
-  }
-
   // Get queue statistics
   async getQueueStats(): Promise<StreamStats> {
     try {
       const jsm = this.natsClient.getJetStreamManager();
       const stream = await jsm.streams.info("email-system");
 
-      // Get consumer info for each type
-      const [batchConsumer, priorityConsumer] = await Promise.all([
-        jsm.consumers.info("email-system", "batch-processor").catch(() => null),
-        jsm.consumers.info("email-system", "priority-processor").catch(() => null),
-      ]);
+      // Get consumer info
+      const batchConsumer = await jsm.consumers.info("email-system", "batch-processor").catch(() => null);
 
-      // Count messages per subject pattern
-      let batchPending = 0;
-      let emailPending = 0;
-      let priorityPending = 0;
-
-      // NATS doesn't provide per-subject counts directly, so we estimate from total
-      // In production, you'd want to track this separately or use stream subject transforms
       const totalMessages = stream.state.messages;
 
       return {
@@ -351,14 +299,9 @@ export class NatsQueueService {
           bytes: Math.floor(stream.state.bytes * 0.1), // Estimate
         },
         email: {
-          pending: totalMessages - (batchConsumer?.num_pending || 0) - (priorityConsumer?.num_pending || 0),
-          consumers: stream.state.consumer_count - 2, // Minus batch and priority
-          bytes: Math.floor(stream.state.bytes * 0.8), // Estimate
-        },
-        priority: {
-          pending: priorityConsumer?.num_pending || 0,
-          consumers: priorityConsumer ? 1 : 0,
-          bytes: Math.floor(stream.state.bytes * 0.1), // Estimate
+          pending: totalMessages - (batchConsumer?.num_pending || 0),
+          consumers: stream.state.consumer_count - 1, // Minus batch
+          bytes: Math.floor(stream.state.bytes * 0.9), // Estimate
         },
       };
     } catch (error) {
@@ -417,7 +360,7 @@ export class NatsQueueService {
       let cleaned = 0;
       for (const consumer of consumers) {
         // Skip system consumers
-        if (consumer.name === "batch-processor" || consumer.name === "priority-processor") {
+        if (consumer.name === "batch-processor") {
           continue;
         }
 

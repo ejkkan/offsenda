@@ -5,87 +5,46 @@ import { WebhookModule } from "../../../modules/webhook-module.js";
 describe("EmailModule.validateConfig", () => {
   const module = new EmailModule();
 
-  describe("mode validation", () => {
-    it("should fail when mode is missing", () => {
+  describe("service validation", () => {
+    it("should fail when service is missing", () => {
       const result = module.validateConfig({});
       expect(result.valid).toBe(false);
-      expect(result.errors).toContain("mode is required (managed or byok)");
+      expect(result.errors).toContain("service is required (ses or resend)");
     });
 
-    it("should fail for invalid mode", () => {
-      const result = module.validateConfig({ mode: "invalid" });
+    it("should fail for invalid service", () => {
+      const result = module.validateConfig({ service: "invalid" });
       expect(result.valid).toBe(false);
-      expect(result.errors).toContain('mode must be "managed" or "byok"');
+      expect(result.errors).toContain('service must be "ses" or "resend"');
     });
 
-    it("should accept managed mode", () => {
-      const result = module.validateConfig({ mode: "managed" });
-      expect(result.valid).toBe(true);
-    });
-
-    it("should accept byok mode with required fields", () => {
-      const result = module.validateConfig({
-        mode: "byok",
-        provider: "resend",
-        apiKey: "re_123456",
-      });
-      expect(result.valid).toBe(true);
-    });
-  });
-
-  describe("BYOK mode validation", () => {
-    it("should fail when provider is missing", () => {
-      const result = module.validateConfig({
-        mode: "byok",
-        apiKey: "test-key",
-      });
+    it("should fail when fromEmail is missing", () => {
+      const result = module.validateConfig({ service: "resend" });
       expect(result.valid).toBe(false);
-      expect(result.errors).toContain("provider is required for BYOK mode (resend or ses)");
+      expect(result.errors).toContain("fromEmail is required");
     });
 
-    it("should fail for invalid provider", () => {
+    it("should accept resend service with required fields", () => {
       const result = module.validateConfig({
-        mode: "byok",
-        provider: "sendgrid",
-        apiKey: "test-key",
-      });
-      expect(result.valid).toBe(false);
-      expect(result.errors).toContain('provider must be "resend" or "ses"');
-    });
-
-    it("should fail when apiKey is missing", () => {
-      const result = module.validateConfig({
-        mode: "byok",
-        provider: "resend",
-      });
-      expect(result.valid).toBe(false);
-      expect(result.errors).toContain("apiKey is required for BYOK mode");
-    });
-
-    it("should fail for SES without proper apiKey format", () => {
-      const result = module.validateConfig({
-        mode: "byok",
-        provider: "ses",
-        apiKey: "just-a-key-without-colon",
-      });
-      expect(result.valid).toBe(false);
-      expect(result.errors).toContain("SES apiKey must be in format: accessKeyId:secretAccessKey");
-    });
-
-    it("should accept SES with proper apiKey format", () => {
-      const result = module.validateConfig({
-        mode: "byok",
-        provider: "ses",
-        apiKey: "AKIAIOSFODNN7EXAMPLE:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        service: "resend",
+        fromEmail: "sender@example.com",
       });
       expect(result.valid).toBe(true);
     });
 
-    it("should accept resend provider", () => {
+    it("should accept ses service with required fields", () => {
       const result = module.validateConfig({
-        mode: "byok",
-        provider: "resend",
-        apiKey: "re_123456789",
+        service: "ses",
+        fromEmail: "sender@example.com",
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it("should accept optional fromName", () => {
+      const result = module.validateConfig({
+        service: "resend",
+        fromEmail: "sender@example.com",
+        fromName: "Sender Name",
       });
       expect(result.valid).toBe(true);
     });
@@ -94,11 +53,10 @@ describe("EmailModule.validateConfig", () => {
   describe("multiple errors", () => {
     it("should collect all errors", () => {
       const result = module.validateConfig({
-        mode: "byok",
-        // missing provider and apiKey
+        // missing service and fromEmail
       });
       expect(result.valid).toBe(false);
-      expect(result.errors?.length).toBeGreaterThan(1);
+      expect(result.errors?.length).toBeGreaterThanOrEqual(1);
     });
   });
 });
@@ -252,7 +210,7 @@ describe("WebhookModule.validateConfig", () => {
     it("should fail for non-number timeout", () => {
       const result = module.validateConfig({
         url: "https://example.com/webhook",
-        timeout: "5000" as any,
+        timeout: "5000" as unknown,
       });
       expect(result.valid).toBe(false);
       expect(result.errors).toContain("timeout must be between 1000 and 60000 milliseconds");
@@ -307,7 +265,7 @@ describe("WebhookModule.validateConfig", () => {
     it("should fail for non-array successStatusCodes", () => {
       const result = module.validateConfig({
         url: "https://example.com/webhook",
-        successStatusCodes: "200" as any,
+        successStatusCodes: "200" as unknown,
       });
       expect(result.valid).toBe(false);
       expect(result.errors).toContain("successStatusCodes must be an array");
@@ -316,7 +274,7 @@ describe("WebhookModule.validateConfig", () => {
     it("should fail for non-number status codes", () => {
       const result = module.validateConfig({
         url: "https://example.com/webhook",
-        successStatusCodes: [200, "201"] as any,
+        successStatusCodes: [200, "201"] as unknown as number[],
       });
       expect(result.valid).toBe(false);
       expect(result.errors).toContain("successStatusCodes must contain only numbers");

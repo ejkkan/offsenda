@@ -338,7 +338,6 @@ export class TestReportBuilder {
           workerPods: parseInt(process.env.WORKER_PODS || "1", 10),
           dragonflyMemoryMb: parseInt(process.env.DRAGONFLY_MEMORY_MB || "900", 10),
           natsNodes: parseInt(process.env.NATS_NODES || "1", 10),
-          provider: process.env.EMAIL_PROVIDER || "mock",
         },
       },
       configuration: {

@@ -13,8 +13,17 @@ describe("RateLimitRegistry", () => {
   });
 
   afterAll(async () => {
-    await registry.close();
-    await redis.quit();
+    // Graceful cleanup - ignore errors if already closed
+    try {
+      await registry.close();
+    } catch {
+      // Ignore cleanup errors
+    }
+    try {
+      await redis.quit();
+    } catch {
+      // Ignore cleanup errors
+    }
   });
 
   beforeEach(async () => {
@@ -41,8 +50,8 @@ describe("RateLimitRegistry", () => {
     });
 
     it("should share provider limit across multiple managed users", async () => {
-      // Set a very low provider limit for testing
-      vi.stubEnv("MANAGED_SES_RATE_LIMIT", "3");
+      // Default MANAGED_SES_RATE_LIMIT is 14, burst capacity is min(max(28,10), 840) = 28
+      // Both users sharing the same provider should consume from the same bucket
 
       const user1Context: RateLimiterContext = {
         mode: "managed",
@@ -60,26 +69,46 @@ describe("RateLimitRegistry", () => {
         userId: "user_2",
       };
 
-      // Both users should share the provider limit
-      // With limit of 3, making 5 requests should exhaust it
+      // Make requests alternating between users
+      // Both should consume from the same provider bucket
       const results: boolean[] = [];
 
-      for (let i = 0; i < 5; i++) {
+      // Make 35 requests to exhaust the burst capacity (28 tokens)
+      for (let i = 0; i < 35; i++) {
         const ctx = i % 2 === 0 ? user1Context : user2Context;
-        const result = await registry.acquire(ctx, 100, 100);
+        const result = await registry.acquire(ctx, 100, 10); // Short timeout
         results.push(result.allowed);
       }
 
-      // Some should fail because they share the provider limit
+      // The burst capacity is 28, so ~28 should succeed, rest should fail
       const allowed = results.filter(Boolean).length;
-      expect(allowed).toBeLessThanOrEqual(3);
-
-      vi.unstubAllEnvs();
+      expect(allowed).toBeGreaterThanOrEqual(25); // At least burst capacity - some variance
+      expect(allowed).toBeLessThan(35); // Not all should succeed
     });
   });
 
   describe("BYOK Flow", () => {
-    it("should only check system and config limiters for BYOK mode", async () => {
+    it("should allow unlimited requests when no config limit is set", async () => {
+      const context: RateLimiterContext = {
+        mode: "byok",
+        provider: "ses",
+        module: "email",
+        sendConfigId: "cfg_byok_unlimited",
+        userId: "user_byok",
+      };
+
+      // With null configRateLimit (no limit configured), BYOK should be unlimited
+      const result = await registry.acquire(context, null, 1000);
+      expect(result.allowed).toBe(true);
+
+      // Should allow many requests since there's no limiter
+      for (let i = 0; i < 10; i++) {
+        const r = await registry.acquire(context, null, 100);
+        expect(r.allowed).toBe(true);
+      }
+    });
+
+    it("should only check config limiter for BYOK mode with configured limit", async () => {
       const context: RateLimiterContext = {
         mode: "byok",
         provider: "ses",
@@ -88,6 +117,7 @@ describe("RateLimitRegistry", () => {
         userId: "user_byok",
       };
 
+      // BYOK with explicit config limit should work
       const result = await registry.acquire(context, 100, 1000);
       expect(result.allowed).toBe(true);
     });
@@ -136,17 +166,20 @@ describe("RateLimitRegistry", () => {
         userId: "user_limited",
       };
 
-      // Set a very low config limit
+      // With configLimit=2 tokens/sec, burst capacity is min(max(4,10), 120) = 10
       const configLimit = 2;
 
       const results: boolean[] = [];
-      for (let i = 0; i < 5; i++) {
-        const result = await registry.acquire(context, configLimit, 50);
+      // Make 15 requests to exhaust the burst capacity (10 tokens)
+      for (let i = 0; i < 15; i++) {
+        const result = await registry.acquire(context, configLimit, 10); // Short timeout
         results.push(result.allowed);
       }
 
       const allowed = results.filter(Boolean).length;
-      expect(allowed).toBeLessThanOrEqual(configLimit);
+      // Initial burst capacity is 10, so ~10 should succeed
+      expect(allowed).toBeGreaterThanOrEqual(8); // Allow some variance
+      expect(allowed).toBeLessThan(15); // Not all should succeed
     });
 
     it("should isolate different configs", async () => {
@@ -202,7 +235,7 @@ describe("RateLimitRegistry", () => {
   });
 
   describe("Status Monitoring", () => {
-    it("should return status for all limiters", async () => {
+    it("should return status for all limiters in managed mode", async () => {
       const context: RateLimiterContext = {
         mode: "managed",
         provider: "ses",
@@ -217,15 +250,53 @@ describe("RateLimitRegistry", () => {
       // Get status
       const status = await registry.getStatus(context, 100);
 
+      // Managed mode should have all three limiters
       expect(status.system).toBeDefined();
       expect(status.system.rate).toBeGreaterThan(0);
       expect(status.provider).toBeDefined();
       expect(status.config).toBeDefined();
     });
+
+    it("should return only config status for BYOK with configured limit", async () => {
+      const context: RateLimiterContext = {
+        mode: "byok",
+        provider: "ses",
+        module: "email",
+        sendConfigId: "cfg_byok_status",
+        userId: "user_byok_status",
+      };
+
+      // Make a request first
+      await registry.acquire(context, 100, 1000);
+
+      // Get status
+      const status = await registry.getStatus(context, 100);
+
+      // BYOK should only have config limiter (no system or provider)
+      expect(status.system).toBeUndefined();
+      expect(status.provider).toBeUndefined();
+      expect(status.config).toBeDefined();
+    });
+
+    it("should return empty status for BYOK without configured limit", async () => {
+      const context: RateLimiterContext = {
+        mode: "byok",
+        provider: "ses",
+        module: "email",
+        sendConfigId: "cfg_byok_unlimited_status",
+        userId: "user_byok_unlimited_status",
+      };
+
+      // Get status with null config limit
+      const status = await registry.getStatus(context, null);
+
+      // BYOK without limit should have no limiters
+      expect(Object.keys(status).length).toBe(0);
+    });
   });
 
   describe("Fail-open behavior", () => {
-    it("should allow requests when Redis is unavailable", async () => {
+    it("should allow requests when Redis is unavailable for managed mode", async () => {
       // Create registry with bad Redis connection
       const badRedis = {
         eval: async () => {
@@ -244,8 +315,8 @@ describe("RateLimitRegistry", () => {
       const badRegistry = new RateLimitRegistry(badRedis);
 
       const context: RateLimiterContext = {
-        mode: "byok",
-        provider: "resend",
+        mode: "managed",
+        provider: "ses",
         module: "email",
         sendConfigId: "cfg_failopen",
         userId: "user_failopen",
@@ -256,6 +327,20 @@ describe("RateLimitRegistry", () => {
       expect(result.allowed).toBe(true);
 
       await badRegistry.close();
+    });
+
+    it("should allow unlimited requests for BYOK without configured limit", async () => {
+      const context: RateLimiterContext = {
+        mode: "byok",
+        provider: "resend",
+        module: "email",
+        sendConfigId: "cfg_unlimited",
+        userId: "user_unlimited",
+      };
+
+      // BYOK without configured limit (null) should be unlimited - no Redis needed
+      const result = await registry.acquire(context, null, 100);
+      expect(result.allowed).toBe(true);
     });
   });
 });

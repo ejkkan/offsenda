@@ -5,18 +5,18 @@ import { eq } from "drizzle-orm";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sendConfigs } from "@batchsender/db";
-import type { EmailModuleConfig, SendConfigData, RateLimitConfig } from "@batchsender/db";
+import type { SendConfigData } from "@batchsender/db";
 
-// Validation schemas
+// Validation schemas - Platform Services + BYOK (Webhook)
+
+// Email: Platform service (SES or Resend)
 const emailConfigSchema = z.object({
-  mode: z.enum(["managed", "byok"]),
-  provider: z.enum(["resend", "ses"]).optional(),
-  apiKey: z.string().optional(),
-  region: z.string().optional(),
-  fromEmail: z.string().email().optional(),
+  service: z.enum(["ses", "resend"]),
+  fromEmail: z.string().email(),
   fromName: z.string().optional(),
 });
 
+// Webhook: BYOK (custom endpoint)
 const webhookConfigSchema = z.object({
   url: z.string().url(),
   method: z.enum(["POST", "PUT"]).optional(),
@@ -26,15 +26,14 @@ const webhookConfigSchema = z.object({
   successStatusCodes: z.array(z.number()).optional(),
 });
 
+// SMS: Platform service (Telnyx)
 const smsConfigSchema = z.object({
-  provider: z.enum(["twilio", "aws-sns"]),
-  accountSid: z.string().optional(),
-  authToken: z.string().optional(),
-  apiKey: z.string().optional(),
-  region: z.string().optional(),
-  fromNumber: z.string().optional(),
+  service: z.literal("telnyx"),
+  fromNumber: z.string(),
+  messagingProfileId: z.string().optional(),
 });
 
+// Push notifications (future)
 const pushConfigSchema = z.object({
   provider: z.enum(["fcm", "apns"]),
   apiKey: z.string().optional(),
@@ -44,8 +43,8 @@ const pushConfigSchema = z.object({
 });
 
 const rateLimitSchema = z.object({
-  perSecond: z.number().min(1).max(500).optional(),
-  perMinute: z.number().optional(),
+  requestsPerSecond: z.number().min(1).max(500).optional(),
+  recipientsPerRequest: z.number().min(1).max(100).optional(),
   dailyLimit: z.number().optional(),
 }).optional();
 
@@ -65,7 +64,7 @@ function maskSensitiveConfig(config: SendConfigData): Record<string, unknown> {
     const key = masked.apiKey as string;
     masked.apiKey = key.slice(0, 8) + "..." + key.slice(-4);
   }
-  // Mask auth tokens (for Twilio)
+  // Mask auth tokens
   if ("authToken" in masked && masked.authToken) {
     const token = masked.authToken as string;
     masked.authToken = token.slice(0, 4) + "..." + token.slice(-4);
@@ -124,26 +123,8 @@ export async function POST(req: Request) {
     const body = await req.json();
     const data = createSendConfigSchema.parse(body);
 
-    // Validate config based on module type
-    if (data.module === "email") {
-      const emailConfig = data.config as EmailModuleConfig;
-      if (emailConfig.mode === "byok") {
-        if (!emailConfig.provider) {
-          return NextResponse.json(
-            { error: "Provider is required for BYOK mode" },
-            { status: 400 }
-          );
-        }
-        if (!emailConfig.apiKey) {
-          return NextResponse.json(
-            { error: "API key is required for BYOK mode" },
-            { status: 400 }
-          );
-        }
-      }
-    } else if (data.module === "webhook") {
-      // Webhook config validated by schema
-    }
+    // Module-specific validation (schema handles most validation)
+    // Additional custom validation can be added here if needed
 
     // Check limit (max 20 configs per user)
     const existingCount = await db.query.sendConfigs.findMany({

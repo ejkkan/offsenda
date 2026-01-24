@@ -64,12 +64,12 @@ export class RateLimitRegistry {
   /**
    * Acquire rate limit tokens for a request using composable checks
    *
-   * For managed flow: checks system -> provider -> config
-   * For BYOK flow: checks system -> config (no shared provider limit)
+   * For managed flow: checks system -> provider -> config (protects shared accounts)
+   * For BYOK flow: only config limiter if explicitly set, otherwise unlimited
    */
   async acquire(
     context: RateLimiterContext,
-    configRateLimit: number,
+    configRateLimit: number | null,
     timeout: number = 5000
   ): Promise<ComposedRateLimitResult> {
     // Ensure connection
@@ -88,6 +88,11 @@ export class RateLimitRegistry {
 
     // Build the list of limiters to check based on mode
     const limiters = this.buildLimiterChain(context, configRateLimit);
+
+    // If no limiters (BYOK with no configured limit), allow unlimited
+    if (limiters.length === 0) {
+      return { allowed: true };
+    }
 
     // Try to acquire from all limiters
     while (Date.now() - startTime < timeout) {
@@ -120,19 +125,24 @@ export class RateLimitRegistry {
 
   /**
    * Build the chain of limiters based on context
+   *
+   * Managed mode: system + provider + config limiters (protects shared accounts)
+   * BYOK mode: only config limiter if explicitly set (user controls their own limits)
    */
   private buildLimiterChain(
     context: RateLimiterContext,
-    configRateLimit: number
+    configRateLimit: number | null
   ): Array<{ key: string; config: RateLimitConfig; factor: LimitingFactor }> {
     const limiters: Array<{ key: string; config: RateLimitConfig; factor: LimitingFactor }> = [];
 
-    // 1. System-wide limiter (always present)
-    limiters.push({
-      key: `${REDIS_KEY_PREFIXES.SYSTEM}:bucket`,
-      config: { tokensPerSecond: config.SYSTEM_RATE_LIMIT },
-      factor: "system",
-    });
+    // 1. System-wide limiter (only for managed mode - protects shared accounts)
+    if (context.mode === "managed") {
+      limiters.push({
+        key: `${REDIS_KEY_PREFIXES.SYSTEM}:bucket`,
+        config: { tokensPerSecond: config.SYSTEM_RATE_LIMIT },
+        factor: "system",
+      });
+    }
 
     // 2. Managed provider limiter (only for managed mode)
     if (context.mode === "managed") {
@@ -144,18 +154,20 @@ export class RateLimitRegistry {
       });
     }
 
-    // 3. Per-config limiter (always present)
-    limiters.push({
-      key: `${REDIS_KEY_PREFIXES.CONFIG}:${context.sendConfigId}:bucket`,
-      config: { tokensPerSecond: configRateLimit },
-      factor: "config",
-    });
+    // 3. Per-config limiter (only if explicitly configured)
+    if (configRateLimit !== null) {
+      limiters.push({
+        key: `${REDIS_KEY_PREFIXES.CONFIG}:${context.sendConfigId}:bucket`,
+        config: { tokensPerSecond: configRateLimit },
+        factor: "config",
+      });
+    }
 
     return limiters;
   }
 
   /**
-   * Get the rate limit for a managed provider
+   * Get the rate limit for a managed provider (platform service)
    */
   private getManagedProviderLimit(provider: ManagedProvider): number {
     switch (provider) {
@@ -165,8 +177,6 @@ export class RateLimitRegistry {
         return config.MANAGED_RESEND_RATE_LIMIT;
       case "telnyx":
         return config.MANAGED_TELNYX_RATE_LIMIT;
-      case "mock":
-        return config.MANAGED_MOCK_RATE_LIMIT;
       default:
         return 100; // Safe default
     }
@@ -274,7 +284,7 @@ export class RateLimitRegistry {
    */
   async getStatus(
     context: RateLimiterContext,
-    configRateLimit: number
+    configRateLimit: number | null
   ): Promise<Record<string, { tokens: number; capacity: number; rate: number }>> {
     const limiters = this.buildLimiterChain(context, configRateLimit);
     const status: Record<string, { tokens: number; capacity: number; rate: number }> = {};

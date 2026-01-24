@@ -5,11 +5,10 @@ import { log } from "../logger.js";
 import { interpolateVariables } from "../domain/utils/template.js";
 
 /**
- * Email Module - Sends emails via Resend or AWS SES
+ * Email Module - Sends emails via platform services (SES or Resend)
  *
- * Supports two modes:
- * - managed: Uses our infrastructure (Resend/SES from env vars)
- * - byok: Uses user's own API key (Bring Your Own Key)
+ * Platform-only: Uses our managed SES or Resend accounts.
+ * For custom endpoints, users should use the Webhook module.
  *
  * Supports batch execution for higher throughput.
  */
@@ -22,26 +21,14 @@ export class EmailModule implements Module {
     const errors: string[] = [];
     const cfg = rawConfig as EmailModuleConfig;
 
-    if (!cfg.mode) {
-      errors.push("mode is required (managed or byok)");
-    } else if (cfg.mode !== "managed" && cfg.mode !== "byok") {
-      errors.push('mode must be "managed" or "byok"');
+    if (!cfg.service) {
+      errors.push("service is required (ses or resend)");
+    } else if (cfg.service !== "ses" && cfg.service !== "resend") {
+      errors.push('service must be "ses" or "resend"');
     }
 
-    if (cfg.mode === "byok") {
-      if (!cfg.provider) {
-        errors.push("provider is required for BYOK mode (resend or ses)");
-      } else if (cfg.provider !== "resend" && cfg.provider !== "ses") {
-        errors.push('provider must be "resend" or "ses"');
-      }
-
-      if (!cfg.apiKey) {
-        errors.push("apiKey is required for BYOK mode");
-      }
-
-      if (cfg.provider === "ses" && cfg.apiKey && !cfg.apiKey.includes(":")) {
-        errors.push("SES apiKey must be in format: accessKeyId:secretAccessKey");
-      }
+    if (!cfg.fromEmail) {
+      errors.push("fromEmail is required");
     }
 
     return { valid: errors.length === 0, errors };
@@ -77,10 +64,15 @@ export class EmailModule implements Module {
 
       let providerMessageId: string;
 
-      if (cfg.mode === "managed") {
-        providerMessageId = await this.sendManaged(processedPayload);
+      if (cfg.service === "resend") {
+        providerMessageId = await this.sendViaResend(processedPayload, config.RESEND_API_KEY);
       } else {
-        providerMessageId = await this.sendBYOK(processedPayload, cfg);
+        providerMessageId = await this.sendViaSES(processedPayload, {
+          region: config.AWS_REGION,
+          accessKeyId: config.AWS_ACCESS_KEY_ID,
+          secretAccessKey: config.AWS_SECRET_ACCESS_KEY,
+          endpoint: config.SES_ENDPOINT,
+        });
       }
 
       return {
@@ -112,10 +104,15 @@ export class EmailModule implements Module {
     }));
 
     try {
-      if (cfg.mode === "managed") {
-        return await this.sendBatchManaged(processedPayloads, start);
+      if (cfg.service === "resend") {
+        return await this.sendBatchViaResend(processedPayloads, config.RESEND_API_KEY, start);
       } else {
-        return await this.sendBatchBYOK(processedPayloads, cfg, start);
+        return await this.sendBatchViaSES(processedPayloads, {
+          region: config.AWS_REGION,
+          accessKeyId: config.AWS_ACCESS_KEY_ID,
+          secretAccessKey: config.AWS_SECRET_ACCESS_KEY,
+          endpoint: config.SES_ENDPOINT,
+        }, start);
       }
     } catch (error) {
       // If the entire batch fails, return failure for all
@@ -130,62 +127,6 @@ export class EmailModule implements Module {
         },
       }));
     }
-  }
-
-  /**
-   * Send batch using managed infrastructure
-   */
-  private async sendBatchManaged(
-    payloads: { recipientId: string; payload: JobPayload }[],
-    startTime: number
-  ): Promise<BatchJobResult[]> {
-    const providerType = config.EMAIL_PROVIDER;
-
-    if (providerType === "resend") {
-      return this.sendBatchViaResend(payloads, config.RESEND_API_KEY, startTime);
-    } else if (providerType === "ses") {
-      return this.sendBatchViaSES(payloads, {
-        region: config.AWS_REGION,
-        accessKeyId: config.AWS_ACCESS_KEY_ID,
-        secretAccessKey: config.AWS_SECRET_ACCESS_KEY,
-        endpoint: config.SES_ENDPOINT,
-      }, startTime);
-    } else if (providerType === "mock") {
-      // Mock provider - simulate success for all
-      const latencyMs = Date.now() - startTime;
-      return payloads.map((p) => ({
-        recipientId: p.recipientId,
-        result: {
-          success: true,
-          providerMessageId: `mock-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          latencyMs,
-        },
-      }));
-    }
-
-    throw new Error(`Unknown managed provider: ${providerType}`);
-  }
-
-  /**
-   * Send batch using user's own API key (BYOK)
-   */
-  private async sendBatchBYOK(
-    payloads: { recipientId: string; payload: JobPayload }[],
-    cfg: EmailModuleConfig,
-    startTime: number
-  ): Promise<BatchJobResult[]> {
-    if (cfg.provider === "resend") {
-      return this.sendBatchViaResend(payloads, cfg.apiKey!, startTime);
-    } else if (cfg.provider === "ses") {
-      const [accessKeyId, secretAccessKey] = cfg.apiKey!.split(":");
-      return this.sendBatchViaSES(payloads, {
-        region: cfg.region || "us-east-1",
-        accessKeyId,
-        secretAccessKey,
-      }, startTime);
-    }
-
-    throw new Error(`Unknown BYOK provider: ${cfg.provider}`);
   }
 
   /**
@@ -256,7 +197,9 @@ export class EmailModule implements Module {
   }
 
   /**
-   * Send batch via AWS SES SendBulkEmail API
+   * Send batch via AWS SES
+   * SES doesn't have a true batch API for custom content, so we send individually
+   * but benefit from connection reuse
    */
   private async sendBatchViaSES(
     payloads: { recipientId: string; payload: JobPayload }[],
@@ -268,71 +211,6 @@ export class EmailModule implements Module {
     },
     startTime: number
   ): Promise<BatchJobResult[]> {
-    // If custom endpoint (mock), fall back to individual sends
-    if (sesConfig.endpoint) {
-      const results: BatchJobResult[] = [];
-      for (const p of payloads) {
-        try {
-          const messageId = await this.sendViaSESMock(p.payload, sesConfig.endpoint);
-          results.push({
-            recipientId: p.recipientId,
-            result: {
-              success: true,
-              providerMessageId: messageId,
-              latencyMs: Date.now() - startTime,
-            },
-          });
-        } catch (error) {
-          results.push({
-            recipientId: p.recipientId,
-            result: {
-              success: false,
-              error: error instanceof Error ? error.message : "Unknown error",
-              latencyMs: Date.now() - startTime,
-            },
-          });
-        }
-      }
-      return results;
-    }
-
-    const { SESv2Client, SendBulkEmailCommand } = await import("@aws-sdk/client-sesv2");
-
-    const client = new SESv2Client({
-      region: sesConfig.region,
-      credentials: sesConfig.accessKeyId
-        ? {
-            accessKeyId: sesConfig.accessKeyId,
-            secretAccessKey: sesConfig.secretAccessKey!,
-          }
-        : undefined,
-    });
-
-    // SES requires a common template or simple content for bulk
-    // For now, we use BulkEmailEntry with individual replacements
-    const fromAddress = payloads[0].payload.fromName
-      ? `${payloads[0].payload.fromName} <${payloads[0].payload.fromEmail}>`
-      : payloads[0].payload.fromEmail!;
-
-    const command = new SendBulkEmailCommand({
-      FromEmailAddress: fromAddress,
-      DefaultContent: {
-        Template: undefined, // We'll use simple content per entry
-      },
-      BulkEmailEntries: payloads.map((p) => ({
-        Destination: {
-          ToAddresses: [p.payload.to!],
-        },
-        ReplacementEmailContent: {
-          ReplacementTemplate: undefined,
-        },
-        // SES bulk requires template, so we send individually for custom content
-      })),
-    });
-
-    // Note: SES bulk email has limitations - requires templates
-    // For fully custom content per recipient, we batch the individual sends
-    // This still benefits from connection reuse
     const results: BatchJobResult[] = [];
 
     for (const p of payloads) {
@@ -359,48 +237,6 @@ export class EmailModule implements Module {
     }
 
     return results;
-  }
-
-  /**
-   * Send using our managed infrastructure
-   */
-  private async sendManaged(payload: JobPayload): Promise<string> {
-    // Use the configured provider from environment
-    const providerType = config.EMAIL_PROVIDER;
-
-    if (providerType === "resend") {
-      return this.sendViaResend(payload, config.RESEND_API_KEY);
-    } else if (providerType === "ses") {
-      return this.sendViaSES(payload, {
-        region: config.AWS_REGION,
-        accessKeyId: config.AWS_ACCESS_KEY_ID,
-        secretAccessKey: config.AWS_SECRET_ACCESS_KEY,
-        endpoint: config.SES_ENDPOINT,
-      });
-    } else if (providerType === "mock") {
-      // For testing
-      return `mock-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    }
-
-    throw new Error(`Unknown managed provider: ${providerType}`);
-  }
-
-  /**
-   * Send using user's own API key (BYOK)
-   */
-  private async sendBYOK(payload: JobPayload, cfg: EmailModuleConfig): Promise<string> {
-    if (cfg.provider === "resend") {
-      return this.sendViaResend(payload, cfg.apiKey!);
-    } else if (cfg.provider === "ses") {
-      const [accessKeyId, secretAccessKey] = cfg.apiKey!.split(":");
-      return this.sendViaSES(payload, {
-        region: cfg.region || "us-east-1",
-        accessKeyId,
-        secretAccessKey,
-      });
-    }
-
-    throw new Error(`Unknown BYOK provider: ${cfg.provider}`);
   }
 
   /**
@@ -440,11 +276,6 @@ export class EmailModule implements Module {
       endpoint?: string;
     }
   ): Promise<string> {
-    // If custom endpoint, use mock server
-    if (sesConfig.endpoint) {
-      return this.sendViaSESMock(payload, sesConfig.endpoint);
-    }
-
     // Dynamic import to avoid loading AWS SDK when not needed
     const { SESv2Client, SendEmailCommand } = await import("@aws-sdk/client-sesv2");
 
@@ -456,6 +287,7 @@ export class EmailModule implements Module {
             secretAccessKey: sesConfig.secretAccessKey!,
           }
         : undefined,
+      ...(sesConfig.endpoint ? { endpoint: sesConfig.endpoint } : {}),
     });
 
     const fromAddress = payload.fromName
@@ -491,32 +323,6 @@ export class EmailModule implements Module {
 
     const result = await client.send(command);
     return result.MessageId || "";
-  }
-
-  /**
-   * Send via mock SES endpoint (for testing)
-   */
-  private async sendViaSESMock(payload: JobPayload, endpoint: string): Promise<string> {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        to: payload.to,
-        from: payload.fromEmail,
-        fromName: payload.fromName,
-        subject: payload.subject,
-        html: payload.htmlContent,
-        text: payload.textContent,
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Mock SES error: ${response.status} - ${error}`);
-    }
-
-    const data = (await response.json()) as { MessageId: string };
-    return data.MessageId;
   }
 
   /**

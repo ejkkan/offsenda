@@ -163,7 +163,6 @@ async function start() {
   }, "api-server started");
 
   printBanner("API Server", {
-    "Rate Limit": `${config.RATE_LIMIT_PER_SECOND}/sec`,
     "NATS": config.NATS_CLUSTER,
   });
 }

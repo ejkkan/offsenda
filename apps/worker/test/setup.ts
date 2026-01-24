@@ -79,6 +79,11 @@ async function startInfrastructure(): Promise<void> {
   process.env.DRAGONFLY_AUXILIARY_URL = "localhost:6380"; // Use same test instance
   process.env.WEBHOOK_SECRET = "test-webhook-secret";
   process.env.DISABLE_RATE_LIMIT = "true"; // Disable rate limiting for E2E tests
+  process.env.NATS_REPLICAS = "1"; // Single replica for non-clustered test NATS
+  process.env.SES_ENDPOINT = "http://localhost:4566"; // LocalStack SES endpoint
+  process.env.AWS_ACCESS_KEY_ID = "test"; // LocalStack doesn't validate credentials
+  process.env.AWS_SECRET_ACCESS_KEY = "test";
+  process.env.AWS_REGION = "us-east-1";
 
   // Stop any existing services
   console.log("  Cleaning up existing services...");
@@ -134,6 +139,22 @@ async function startInfrastructure(): Promise<void> {
     }
   }, 45000); // 45 seconds timeout
 
+  await waitForService("LocalStack (SES)", async () => {
+    try {
+      const response = await fetch("http://localhost:4566/_localstack/health");
+      if (!response.ok) return false;
+      const health = await response.json() as { services?: { ses?: string } };
+      return health.services?.ses === "running" || health.services?.ses === "available";
+    } catch {
+      return false;
+    }
+  }, 60000); // 60 seconds timeout (LocalStack can be slow to start)
+
+  // Verify a test email address in LocalStack SES (required for sending)
+  console.log("  Verifying test email in LocalStack SES...");
+  exec(`docker exec batchsender-test-localstack awslocal ses verify-email-identity --email-address test@batchsender.local`, true);
+  console.log("  ✓ Test email verified");
+
   console.log("✓ Infrastructure ready\n");
 
   // Initialize database schema
@@ -166,8 +187,6 @@ async function startWorker(): Promise<void> {
   workerProcess = spawn("tsx", ["src/index.ts"], {
     env: {
       ...process.env,
-      // IMPORTANT: Always use mock email provider in tests
-      EMAIL_PROVIDER: "mock",
       NODE_ENV: "test",
       PORT: WORKER_PORT,
       LOG_LEVEL: "error",
@@ -183,6 +202,11 @@ async function startWorker(): Promise<void> {
       DRAGONFLY_AUXILIARY_URL: "localhost:6380", // Use same test instance
       WEBHOOK_SECRET: "test-webhook-secret",
       DISABLE_RATE_LIMIT: "true", // Disable rate limiting for E2E tests
+      NATS_REPLICAS: "1", // Single replica for non-clustered test NATS
+      SES_ENDPOINT: "http://localhost:4566", // LocalStack SES endpoint
+      AWS_ACCESS_KEY_ID: "test", // LocalStack doesn't validate credentials
+      AWS_SECRET_ACCESS_KEY: "test",
+      AWS_REGION: "us-east-1"
     },
     stdio: ["ignore", "pipe", "pipe"],
     cwd: WORKER_DIR,

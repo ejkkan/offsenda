@@ -224,12 +224,14 @@ export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
 }));
 
 // Config type definitions for send_configs
+/**
+ * Email Module Config - Platform service only
+ *
+ * Uses our managed SES or Resend accounts. For custom endpoints, use WebhookModuleConfig.
+ */
 export type EmailModuleConfig = {
-  mode: "managed" | "byok";
-  provider?: "resend" | "ses";
-  apiKey?: string;
-  region?: string;
-  fromEmail?: string;
+  service: "ses" | "resend";
+  fromEmail: string;
   fromName?: string;
 };
 
@@ -242,14 +244,14 @@ export type WebhookModuleConfig = {
   successStatusCodes?: number[];
 };
 
+/**
+ * SMS Module Config - Platform service only
+ *
+ * Uses our managed Telnyx account. For custom endpoints, use WebhookModuleConfig.
+ */
 export type SmsModuleConfig = {
-  mode?: "managed" | "byok"; // Optional for backwards compatibility (defaults to byok if credentials provided)
-  provider: "twilio" | "aws-sns" | "mock" | "telnyx";
-  accountSid?: string;
-  authToken?: string;
-  apiKey?: string;
-  region?: string;
-  fromNumber?: string;
+  service: "telnyx";
+  fromNumber: string;
   messagingProfileId?: string; // Telnyx-specific: optional messaging profile
 };
 

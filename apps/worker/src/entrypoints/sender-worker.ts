@@ -5,7 +5,6 @@
  *
  * Responsibilities:
  * - Consume from email.user.{userId}.send (per-user queues)
- * - Consume from sys.email.priority (priority emails)
  * - Idempotency check via Dragonfly
  * - Rate limiting (managed/BYOK)
  * - Execute send via provider
@@ -95,13 +94,6 @@ async function start() {
   // Create worker
   worker = new NatsEmailWorker(natsClient);
 
-  // Start priority processor
-  worker.startPriorityProcessor().catch((error) => {
-    log.system.warn({
-      error: error instanceof Error ? error.message : String(error),
-    }, "priority processor error (non-fatal)");
-  });
-
   // Start user workers (main email processing)
   await worker.startExistingUserWorkers();
 
@@ -111,12 +103,9 @@ async function start() {
   log.system.info({
     service: "sender-worker",
     port: config.PORT,
-    maxConcurrentRequests: config.MAX_CONCURRENT_REQUESTS,
   }, "sender-worker started");
 
   printBanner("Sender Worker", {
-    "Max Concurrent": config.MAX_CONCURRENT_REQUESTS,
-    "Provider": config.EMAIL_PROVIDER,
     "NATS": config.NATS_CLUSTER,
   });
 }

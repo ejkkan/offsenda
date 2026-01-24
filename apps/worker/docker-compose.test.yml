@@ -76,6 +76,24 @@ services:
     networks:
       - test-network
 
+  # LocalStack for AWS SES mocking
+  localstack:
+    image: localstack/localstack:3.0
+    container_name: batchsender-test-localstack
+    ports:
+      - "4566:4566"  # LocalStack edge port
+    environment:
+      SERVICES: ses
+      DEFAULT_REGION: us-east-1
+      DEBUG: 0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - test-network
+
 networks:
   test-network:
     driver: bridge
