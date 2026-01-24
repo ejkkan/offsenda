@@ -2259,6 +2259,9 @@ spec:
         - name: grafana-loadtest-dashboard
           mountPath: /var/lib/grafana/dashboards/loadtest.json
           subPath: loadtest.json
+        - name: grafana-stress-test-dashboard
+          mountPath: /var/lib/grafana/dashboards/stress-test.json
+          subPath: stress-test.json
         - name: grafana-storage
           mountPath: /var/lib/grafana
         resources:
@@ -2299,6 +2302,9 @@ spec:
       - name: grafana-loadtest-dashboard
         configMap:
           name: grafana-loadtest-dashboard
+      - name: grafana-stress-test-dashboard
+        configMap:
+          name: grafana-stress-test-dashboard
       - name: grafana-storage
         persistentVolumeClaim:
           claimName: grafana-pvc
