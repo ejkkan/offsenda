@@ -500,8 +500,9 @@ export class NatsEmailWorker {
       });
 
       // Rate limiting (handles managed vs BYOK flows)
-      // dryRun still applies rate limiting to simulate realistic throughput
-      const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
+      // dryRun uses longer timeout to avoid failures - we want to simulate throughput, not test timeouts
+      const rateLimitTimeout = dryRun ? 300000 : 10000; // 5 min for dryRun, 10s for real sends
+      const rateLimitResult = await acquireRateLimit(sendConfig, userId, rateLimitTimeout, dryRun);
       if (!rateLimitResult.allowed) {
         throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
       }
@@ -672,9 +673,11 @@ export class NatsEmailWorker {
         const minLatency = config.DRY_RUN_LATENCY_MIN_MS;
         const maxLatency = config.DRY_RUN_LATENCY_MAX_MS;
 
+        // dryRun uses longer timeout to avoid failures
+        const rateLimitTimeout = 300000; // 5 min for dryRun
         if (module.supportsBatch) {
           // Batch-supporting module (e.g., SES): one rate limit token, one delay for entire batch
-          const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
+          const rateLimitResult = await acquireRateLimit(sendConfig, userId, rateLimitTimeout, dryRun);
           if (!rateLimitResult.allowed) {
             throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
           }
@@ -698,7 +701,7 @@ export class NatsEmailWorker {
           batchResults = [];
           for (const p of batchPayloads) {
             // Acquire rate limit token for each email (like real Resend behavior)
-            const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
+            const rateLimitResult = await acquireRateLimit(sendConfig, userId, rateLimitTimeout, dryRun);
             if (!rateLimitResult.allowed) {
               throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
             }
@@ -722,7 +725,8 @@ export class NatsEmailWorker {
         }
       } else if (module.supportsBatch && module.executeBatch) {
         // Real batch execution - acquire one token for the batch
-        const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
+        const realSendTimeout = 10000; // 10s for real sends
+        const rateLimitResult = await acquireRateLimit(sendConfig, userId, realSendTimeout, dryRun);
         if (!rateLimitResult.allowed) {
           throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
         }
@@ -755,10 +759,11 @@ export class NatsEmailWorker {
           createdAt: new Date(),
           updatedAt: new Date(),
         };
+        const realSendTimeout = 10000; // 10s for real sends
         batchResults = [];
         for (const p of batchPayloads) {
           // Rate limit per email for non-batch providers
-          const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
+          const rateLimitResult = await acquireRateLimit(sendConfig, userId, realSendTimeout, dryRun);
           if (!rateLimitResult.allowed) {
             throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
           }

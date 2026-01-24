@@ -30,6 +30,7 @@ interface TestUser {
   userId: string;
   email: string;
   apiKey: string;
+  sendConfigId: string;
 }
 
 interface Batch {
@@ -88,6 +89,7 @@ async function createBatch(user: TestUser, batchIndex: number, userIndex: number
     },
     body: JSON.stringify({
       name: `Stress Test U${userIndex} B${batchIndex} ${new Date().toISOString()}`,
+      sendConfigId: user.sendConfigId,
       subject: "Stress Test - Dry Run",
       fromEmail: "stresstest@batchsender.local",
       fromName: "Stress Test",

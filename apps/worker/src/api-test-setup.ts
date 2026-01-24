@@ -44,6 +44,18 @@ function generateApiKey(): string {
   return `bsk_test_${crypto.randomBytes(24).toString("base64url")}`;
 }
 
+/**
+ * Generate randomized rate limits for realistic load testing
+ * requestsPerSecond: 2-20 (simulates different provider tiers)
+ * recipientsPerRequest: 1-100 (simulates different batch sizes)
+ */
+function generateRandomRateLimit(): { requestsPerSecond: number; recipientsPerRequest: number } {
+  return {
+    requestsPerSecond: Math.floor(Math.random() * 19) + 2, // 2-20
+    recipientsPerRequest: Math.floor(Math.random() * 100) + 1, // 1-100
+  };
+}
+
 export async function registerTestSetupApi(app: FastifyInstance): Promise<void> {
   // Block in production unless explicitly enabled
   if (IS_PRODUCTION && process.env.ENABLE_TEST_SETUP_API !== "true") {
@@ -115,12 +127,30 @@ export async function registerTestSetupApi(app: FastifyInstance): Promise<void> 
 
     log.system.info({ userId: user.id, apiKeyId: apiKey.id }, "Created test API key");
 
+    // Create a sendConfig with randomized rate limits for realistic load testing
+    const rateLimit = generateRandomRateLimit();
+    const [sendConfig] = await db
+      .insert(sendConfigs)
+      .values({
+        userId: user.id,
+        name: "test-config",
+        module: "email",
+        config: { service: "resend", fromEmail: "test@example.com" } as EmailModuleConfig,
+        rateLimit,
+        isDefault: true,
+        isActive: true,
+      })
+      .returning();
+
+    log.system.info({ userId: user.id, sendConfigId: sendConfig.id }, "Created test sendConfig");
+
     return reply.status(201).send({
       userId: user.id,
       email: user.email,
       apiKey: rawKey, // Only time the raw key is exposed
       apiKeyId: apiKey.id,
       apiKeyPrefix: keyPrefix,
+      sendConfigId: sendConfig.id,
     });
   });
 
@@ -332,8 +362,9 @@ export async function registerTestSetupApi(app: FastifyInstance): Promise<void> 
         apiKeyId: apiKey.id,
       };
 
-      // Optionally create send config
+      // Optionally create send config with randomized rate limits
       if (withSendConfig) {
+        const rateLimit = generateRandomRateLimit();
         const [sendConfig] = await db
           .insert(sendConfigs)
           .values({
@@ -341,7 +372,7 @@ export async function registerTestSetupApi(app: FastifyInstance): Promise<void> 
             name: `${prefix}-test-config`,
             module: "email",
             config: { service: "resend", fromEmail: "test@example.com" } as EmailModuleConfig,
-            rateLimit: { perSecond: 5000 },
+            rateLimit,
             isDefault: true,
             isActive: true,
           })
