@@ -20,6 +20,7 @@ import {
   emailSendDuration,
   batchesProcessedTotal,
   clickhouseEventsTotal,
+  natsEmailsProcessed,
 } from "../metrics.js";
 import { calculateNatsBackoff, calculateBatchBackoff, calculateEmailBackoff } from "../domain/utils/backoff.js";
 import { streamRecipientPages, countRecipients, type RecipientRow } from "../domain/utils/recipient-pagination.js";
@@ -570,6 +571,7 @@ export class NatsEmailWorker {
 
       sendTimer();
       emailsSentTotal.inc({ provider: sendConfig.module, status: "sent" });
+      natsEmailsProcessed.inc({ status: "success" });
       clickhouseEventsTotal.inc({ event_type: "sent" });
 
       log.email.debug({ batchId, to: recipientIdentifier, module: sendConfig.module }, "sent");
@@ -764,6 +766,7 @@ export class NatsEmailWorker {
           }
 
           emailsSentTotal.inc({ provider: sendConfig.module, status: "sent" });
+          natsEmailsProcessed.inc({ status: "success" });
           clickhouseEventsTotal.inc({ event_type: "sent" });
         } else {
           logEventBuffered({
@@ -777,6 +780,7 @@ export class NatsEmailWorker {
           });
 
           emailErrorsTotal.inc({ provider: sendConfig.module, error_type: "permanent" });
+          natsEmailsProcessed.inc({ status: "failed" });
           clickhouseEventsTotal.inc({ event_type: "failed" });
         }
       }

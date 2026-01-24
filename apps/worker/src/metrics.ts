@@ -135,6 +135,35 @@ export const natsMessageProcessingDuration = new promClient.Histogram({
   buckets: [0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30],
 });
 
+/**
+ * Counter: Individual emails enqueued to NATS (not chunks)
+ * This shows the actual email volume flowing into the queue
+ */
+export const natsEmailsEnqueued = new promClient.Counter({
+  name: 'nats_emails_enqueued_total',
+  help: 'Total number of individual emails enqueued to NATS',
+});
+
+/**
+ * Counter: Individual emails processed from NATS (not chunks)
+ * This shows the actual email volume being processed from the queue
+ * Labels: status (success/failed)
+ */
+export const natsEmailsProcessed = new promClient.Counter({
+  name: 'nats_emails_processed_total',
+  help: 'Total number of individual emails processed from NATS',
+  labelNames: ['status'],
+});
+
+/**
+ * Gauge: Current emails in NATS queue (enqueued - processed)
+ * Approximation of queue depth in terms of individual emails
+ */
+export const natsEmailsQueueDepth = new promClient.Gauge({
+  name: 'nats_emails_queue_depth',
+  help: 'Approximate number of individual emails waiting in NATS queue',
+});
+
 // ============================================
 // Provider Rate Limiting Metrics
 // ============================================

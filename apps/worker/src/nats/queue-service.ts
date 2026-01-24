@@ -1,7 +1,7 @@
 import { JetStreamClient, StringCodec, headers as natsHeaders } from "nats";
 import { NatsClient } from "./client.js";
 import { log, createTimer, getTraceId } from "../logger.js";
-import { enqueueFailuresTotal } from "../metrics.js";
+import { enqueueFailuresTotal, natsEmailsEnqueued } from "../metrics.js";
 
 // Import shared types - single source of truth
 import type {
@@ -101,6 +101,9 @@ export class NatsQueueService {
       );
 
       if (!ack.duplicate) {
+        // Track individual emails enqueued (not just chunks)
+        natsEmailsEnqueued.inc(chunk.recipientIds.length);
+
         log.queue.debug(
           {
             batchId: chunk.batchId,
