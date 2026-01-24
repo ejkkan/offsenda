@@ -206,8 +206,11 @@ redis.call('HSET', recipientsKey, recipientId, stateJson)
 -- Add to pending sync set
 redis.call('SADD', pendingSyncKey, recipientId)
 
--- Decrement global pending counter
-redis.call('DECR', globalPendingKey)
+-- Decrement global pending counter (but not below 0)
+local currentPending = tonumber(redis.call('GET', globalPendingKey) or '0')
+if currentPending > 0 then
+  redis.call('DECR', globalPendingKey)
+end
 
 -- Refresh TTL
 redis.call('PEXPIRE', countersKey, ttl)
@@ -247,8 +250,11 @@ redis.call('HSET', recipientsKey, recipientId, stateJson)
 -- Add to pending sync set
 redis.call('SADD', pendingSyncKey, recipientId)
 
--- Decrement global pending counter
-redis.call('DECR', globalPendingKey)
+-- Decrement global pending counter (but not below 0)
+local currentPending = tonumber(redis.call('GET', globalPendingKey) or '0')
+if currentPending > 0 then
+  redis.call('DECR', globalPendingKey)
+end
 
 -- Refresh TTL
 redis.call('PEXPIRE', countersKey, ttl)
@@ -326,9 +332,14 @@ if #recipientArgs > 0 then
   redis.call('SADD', pendingSyncKey, unpack(syncArgs))
 end
 
--- Decrement global pending counter by total processed
+-- Decrement global pending counter by total processed (but not below 0)
 local totalProcessed = sentIncrement + failedIncrement
-redis.call('DECRBY', globalPendingKey, totalProcessed)
+local currentPending = tonumber(redis.call('GET', globalPendingKey) or '0')
+if currentPending >= totalProcessed then
+  redis.call('DECRBY', globalPendingKey, totalProcessed)
+elseif currentPending > 0 then
+  redis.call('SET', globalPendingKey, '0')
+end
 
 -- Refresh TTL
 redis.call('PEXPIRE', countersKey, ttl)
