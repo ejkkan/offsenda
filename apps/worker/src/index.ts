@@ -33,7 +33,8 @@ import { getHotStateManager } from "./hot-state-manager.js";
 import { runPreflight } from "./preflight.js";
 
 // Worker lifecycle metrics
-import { workerStartupsTotal, workerStartTimestamp } from "./metrics.js";
+import { workerStartupsTotal, workerStartTimestamp, pendingRecipientsTotal, batchesInProgress } from "./metrics.js";
+import { sql } from "drizzle-orm";
 
 const app = Fastify({
   logger: false,  // We use our own structured logger
@@ -145,6 +146,54 @@ let postgresSyncService: PostgresSyncService;
 // Interval references for cleanup on shutdown
 let syncQueuedInterval: NodeJS.Timeout | null = null;
 let cleanupConsumersInterval: NodeJS.Timeout | null = null;
+let metricsUpdateInterval: NodeJS.Timeout | null = null;
+
+/**
+ * Update scaling metrics for KEDA.
+ * Reads global pending from Dragonfly with DB fallback.
+ */
+async function updateScalingMetrics(): Promise<void> {
+  try {
+    const hotState = getHotStateManager();
+    const dragonflyPending = await hotState.getGlobalPendingRecipients();
+
+    // Query database for ground truth (used for reconciliation and monitoring)
+    const dbResult = await db.execute(sql`
+      SELECT
+        COALESCE(SUM(total_recipients - sent_count - failed_count), 0)::int AS pending,
+        COUNT(*)::int AS batch_count
+      FROM batches
+      WHERE status = 'processing'
+    `);
+
+    const row = dbResult.rows[0] as { pending: number; batch_count: number } | undefined;
+    const dbPending = row?.pending ?? 0;
+    const processingBatches = row?.batch_count ?? 0;
+
+    // Use Dragonfly value if reasonable, otherwise fall back to DB
+    let pendingRecipients: number;
+    if (dragonflyPending > 0) {
+      pendingRecipients = dragonflyPending;
+    } else if (dbPending > 0 && dragonflyPending === 0) {
+      pendingRecipients = dbPending;
+      log.system.warn(
+        { dragonflyPending, dbPending },
+        "Dragonfly counter is 0 but DB shows pending work - using DB fallback"
+      );
+    } else {
+      pendingRecipients = Math.max(0, dragonflyPending);
+    }
+
+    pendingRecipientsTotal.set(pendingRecipients);
+    batchesInProgress.set(processingBatches);
+
+    if (pendingRecipients > 0 || processingBatches > 0) {
+      log.system.debug({ pendingRecipients, dragonflyPending, dbPending, processingBatches }, "scaling metrics updated");
+    }
+  } catch (error) {
+    log.system.warn({ error: (error as Error).message }, "failed to update scaling metrics");
+  }
+}
 
 // Register routes - webhooks registered after NATS initialization
 
@@ -322,6 +371,11 @@ try {
   // Start periodic sync for new batches (every 5 seconds)
   syncQueuedInterval = setInterval(syncQueuedBatchesToQueue, 5000);
 
+  // Start periodic scaling metrics update for KEDA (every 5 seconds)
+  await updateScalingMetrics();
+  metricsUpdateInterval = setInterval(updateScalingMetrics, 5000);
+  log.system.info({}, "scaling metrics updater started (5s interval)");
+
   // Start periodic cleanup of idle consumers (every hour)
   cleanupConsumersInterval = setInterval(() => {
     queueService.cleanupIdleConsumers().catch((error) => {
@@ -393,6 +447,10 @@ async function shutdown() {
   if (cleanupConsumersInterval) {
     clearInterval(cleanupConsumersInterval);
     cleanupConsumersInterval = null;
+  }
+  if (metricsUpdateInterval) {
+    clearInterval(metricsUpdateInterval);
+    metricsUpdateInterval = null;
   }
 
   await withTimeout(app.close(), 2000, "Fastify"); // Stop HTTP server first
