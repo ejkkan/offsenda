@@ -12,11 +12,11 @@ spec:
   cooldownPeriod: 15  # Wait 15s before scaling down (faster reactions)
   triggers:
   # Use Prometheus scaler to watch the email queue depth
-  # This reads from the worker's /metrics endpoint via Prometheus
+  # Use max() not sum() since all workers report the same NATS stream state
   - type: prometheus
     metadata:
       serverAddress: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
       metricName: nats_queue_depth_total
-      query: sum(nats_queue_depth_total)
+      query: max(nats_queue_depth_total)
       threshold: "1000"  # Scale up when >1000 pending messages per pod
       activationThreshold: "100"  # Activate scaling when >100 messages
