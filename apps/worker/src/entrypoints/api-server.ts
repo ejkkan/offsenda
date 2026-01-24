@@ -90,8 +90,11 @@ app.addHook("onRequest", async (request, reply) => {
     }
   }
 
-  // Rate limiting
-  if (!config.DISABLE_RATE_LIMIT && rateLimiterService) {
+  // Rate limiting - bypass for admin requests
+  const adminSecret = request.headers["x-admin-secret"];
+  const isAdminRequest = adminSecret === config.TEST_ADMIN_SECRET;
+
+  if (!config.DISABLE_RATE_LIMIT && rateLimiterService && !isAdminRequest) {
     const clientIp = request.ip;
     const result = await rateLimiterService.checkLimit(clientIp);
 
