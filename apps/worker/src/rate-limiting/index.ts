@@ -86,11 +86,11 @@ export async function acquireRateLimit(
   sendConfig: EmbeddedSendConfig,
   userId: string,
   timeout: number = 1000,
-  dryRun: boolean = false
+  _dryRun: boolean = false // dryRun still applies rate limiting to simulate realistic load
 ): Promise<ComposedRateLimitResult> {
-  // Skip rate limiting for dry-run mode (no external providers called)
-  // or when rate limiting is explicitly disabled
-  if (config.DISABLE_RATE_LIMIT || dryRun) {
+  // Only skip rate limiting when explicitly disabled via config
+  // dryRun mode still applies rate limiting to accurately simulate production throughput
+  if (config.DISABLE_RATE_LIMIT) {
     return { allowed: true };
   }
 

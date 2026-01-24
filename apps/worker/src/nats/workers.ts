@@ -500,7 +500,7 @@ export class NatsEmailWorker {
       });
 
       // Rate limiting (handles managed vs BYOK flows)
-      // Pass dryRun flag - rate limiting is skipped for dry-run mode since no external providers are called
+      // dryRun still applies rate limiting to simulate realistic throughput
       const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
       if (!rateLimitResult.allowed) {
         throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
@@ -663,35 +663,69 @@ export class NatsEmailWorker {
         };
       });
 
-      // Rate limiting - acquire ONE token for this batch request
-      // Pass dryRun flag - rate limiting is skipped for dry-run mode since no external providers are called
-      const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
-      if (!rateLimitResult.allowed) {
-        throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
-      }
-
       const sendTimer = emailSendDuration.startTimer({ provider: sendConfig.module, status: "success" });
       let batchResults: import("../modules/types.js").BatchJobResult[];
 
       if (dryRun) {
-        // Dry run - simulate success for all
+        // Dry run - simulate realistic provider behavior WITHOUT actual API calls
+        // This respects rate limits and simulates latency to match production throughput
         const minLatency = config.DRY_RUN_LATENCY_MIN_MS;
         const maxLatency = config.DRY_RUN_LATENCY_MAX_MS;
-        const simulatedLatency = minLatency + Math.random() * (maxLatency - minLatency);
-        if (simulatedLatency > 1) {
-          await new Promise((resolve) => setTimeout(resolve, simulatedLatency));
-        }
 
-        batchResults = batchPayloads.map((p) => ({
-          recipientId: p.recipientId,
-          result: {
-            success: true,
-            providerMessageId: `dry-run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-            latencyMs: simulatedLatency,
-          },
-        }));
-        log.email.debug({ batchId, chunkIndex, count: batchPayloads.length }, "dry run - skipped outbound calls");
+        if (module.supportsBatch) {
+          // Batch-supporting module (e.g., SES): one rate limit token, one delay for entire batch
+          const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
+          if (!rateLimitResult.allowed) {
+            throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
+          }
+
+          const simulatedLatency = minLatency + Math.random() * (maxLatency - minLatency);
+          if (simulatedLatency > 1) {
+            await new Promise((resolve) => setTimeout(resolve, simulatedLatency));
+          }
+
+          batchResults = batchPayloads.map((p) => ({
+            recipientId: p.recipientId,
+            result: {
+              success: true,
+              providerMessageId: `dry-run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+              latencyMs: simulatedLatency,
+            },
+          }));
+          log.email.debug({ batchId, chunkIndex, count: batchPayloads.length }, "dry run batch - simulated batch send");
+        } else {
+          // Non-batch module (e.g., Resend): rate limit + delay PER EMAIL to simulate individual API calls
+          batchResults = [];
+          for (const p of batchPayloads) {
+            // Acquire rate limit token for each email (like real Resend behavior)
+            const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
+            if (!rateLimitResult.allowed) {
+              throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
+            }
+
+            // Simulate API latency per email
+            const simulatedLatency = minLatency + Math.random() * (maxLatency - minLatency);
+            if (simulatedLatency > 1) {
+              await new Promise((resolve) => setTimeout(resolve, simulatedLatency));
+            }
+
+            batchResults.push({
+              recipientId: p.recipientId,
+              result: {
+                success: true,
+                providerMessageId: `dry-run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+                latencyMs: simulatedLatency,
+              },
+            });
+          }
+          log.email.debug({ batchId, chunkIndex, count: batchPayloads.length }, "dry run - simulated individual sends");
+        }
       } else if (module.supportsBatch && module.executeBatch) {
+        // Real batch execution - acquire one token for the batch
+        const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
+        if (!rateLimitResult.allowed) {
+          throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
+        }
         // Use batch execution
         const configForModule = {
           id: sendConfig.id,
@@ -707,7 +741,8 @@ export class NatsEmailWorker {
         };
         batchResults = await module.executeBatch(batchPayloads, configForModule);
       } else {
-        // Fallback to individual execution for non-batch modules
+        // Fallback to individual execution for non-batch modules (e.g., Resend)
+        // Acquire rate limit per email since each one is a separate API call
         const configForModule = {
           id: sendConfig.id,
           userId,
@@ -722,6 +757,11 @@ export class NatsEmailWorker {
         };
         batchResults = [];
         for (const p of batchPayloads) {
+          // Rate limit per email for non-batch providers
+          const rateLimitResult = await acquireRateLimit(sendConfig, userId, 10000, dryRun);
+          if (!rateLimitResult.allowed) {
+            throw new Error(`Rate limit exceeded (${rateLimitResult.limitingFactor})`);
+          }
           const result = await module.execute(p.payload, configForModule);
           batchResults.push({ recipientId: p.recipientId, result });
         }
