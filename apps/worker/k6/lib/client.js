@@ -404,6 +404,119 @@ export class TestClient {
   }
 
   // ===========================================================================
+  // Real Metrics (from Prometheus via /api/metrics/summary)
+  // ===========================================================================
+
+  /**
+   * Get real metrics from Prometheus via the worker's metrics summary endpoint.
+   * This provides accurate throughput numbers (the same as Grafana shows).
+   *
+   * @returns {object|null} Metrics summary or null if unavailable
+   */
+  getRealMetrics() {
+    const response = this._request('GET', '/api/metrics/summary', null, { admin: true, auth: false });
+
+    if (response.status !== 200) {
+      console.warn(`Failed to get real metrics: ${response.status}`);
+      return null;
+    }
+
+    return this._parseResponse(response);
+  }
+
+  /**
+   * Wait for batch completion with real metrics tracking.
+   * Returns both batch status and real throughput from Prometheus.
+   *
+   * @param {string} batchId - Batch ID
+   * @param {object} options - Options
+   * @returns {object} Final batch status with real metrics
+   */
+  waitForCompletionWithMetrics(batchId, options = {}) {
+    const maxWait = options.maxWaitSeconds || 300;
+    const pollInterval = options.pollIntervalSeconds || 2;
+    const silent = options.silent || false;
+
+    const startTime = Date.now();
+
+    // Capture starting metrics for delta calculation
+    const startMetrics = this.getRealMetrics();
+    const startEmailsSent = startMetrics?.emailsSentTotal || 0;
+
+    let lastMetrics = null;
+
+    while ((Date.now() - startTime) / 1000 < maxWait) {
+      sleep(pollInterval);
+
+      const batch = this.getBatchStatus(batchId);
+      if (!batch) continue;
+
+      // Get real metrics from Prometheus
+      const currentMetrics = this.getRealMetrics();
+      if (currentMetrics) {
+        lastMetrics = currentMetrics;
+      }
+
+      if (batch.status === 'completed' || batch.status === 'failed') {
+        const duration = Date.now() - startTime;
+        metrics.batchCompletionDuration.add(duration);
+
+        // Calculate both k6-based and Prometheus-based throughput
+        const k6Throughput = batch.totalRecipients / (duration / 1000);
+        const emailsSentDelta = (lastMetrics?.emailsSentTotal || 0) - startEmailsSent;
+
+        // Use the real rate from Prometheus if available
+        const realThroughput = lastMetrics?.emailsSentRate1m || 0;
+
+        if (batch.status === 'completed') {
+          metrics.batchesCompleted.add(1);
+          metrics.batchFailRate.add(false);
+          // Record both throughputs for comparison
+          metrics.batchThroughput.add(k6Throughput);
+
+          if (!silent) {
+            console.log(`Batch ${batchId} completed in ${duration}ms`);
+            console.log(`  k6 calculated throughput: ${k6Throughput.toFixed(1)}/sec (includes polling overhead)`);
+            console.log(`  Prometheus rate (1m): ${realThroughput.toFixed(1)}/sec (actual throughput)`);
+            console.log(`  Emails sent delta: ${emailsSentDelta}`);
+          }
+        } else {
+          metrics.batchesFailed.add(1);
+          metrics.batchFailRate.add(true);
+          if (!silent) {
+            console.log(`Batch ${batchId} failed: sent=${batch.sentCount}, failed=${batch.failedCount}`);
+          }
+        }
+
+        return {
+          batch,
+          metrics: {
+            k6Throughput,
+            realThroughput,
+            emailsSentDelta,
+            startEmailsSent,
+            endEmailsSent: lastMetrics?.emailsSentTotal || 0,
+            prometheusAvailable: lastMetrics?.source === 'prometheus',
+          },
+        };
+      }
+
+      // Log progress
+      if (!silent && batch.totalRecipients > 0) {
+        const progress = ((batch.sentCount + batch.failedCount) / batch.totalRecipients * 100).toFixed(1);
+        const rate = lastMetrics?.emailsSentRate1m?.toFixed(1) || 'N/A';
+        console.log(`Batch ${batchId}: ${progress}% complete (real rate: ${rate}/sec)`);
+      }
+    }
+
+    // Timeout
+    metrics.batchesFailed.add(1);
+    metrics.batchFailRate.add(true);
+    console.log(`Batch ${batchId} timed out after ${maxWait}s`);
+    return { batch: null, metrics: null };
+  }
+
+  // ===========================================================================
   // Utilities
   // ===========================================================================
 

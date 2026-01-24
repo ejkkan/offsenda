@@ -41,7 +41,7 @@ function verifyAdminSecret(headers: Record<string, string | string[] | undefined
  * Generate a random API key
  */
 function generateApiKey(): string {
-  return `bs_test_${crypto.randomBytes(24).toString("base64url")}`;
+  return `bsk_test_${crypto.randomBytes(24).toString("base64url")}`;
 }
 
 export async function registerTestSetupApi(app: FastifyInstance): Promise<void> {

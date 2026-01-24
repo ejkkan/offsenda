@@ -37,6 +37,15 @@ function getMetric(data, name, stat = 'avg') {
 
 /**
  * Generate a test report from k6 summary data
+ *
+ * @param {object} data - k6 summary data
+ * @param {object} options - Report options
+ * @param {string} options.name - Test name
+ * @param {string} options.testType - Type of test (load/stress/etc)
+ * @param {string} options.preset - Configuration preset used
+ * @param {object} options.parameters - Test parameters
+ * @param {object} options.thresholds - Threshold definitions
+ * @param {object} options.prometheusMetrics - Optional real metrics from Prometheus
  */
 export function generateTestReport(data, options) {
   const {
@@ -45,6 +54,7 @@ export function generateTestReport(data, options) {
     preset,
     parameters = {},
     thresholds: thresholdDefs = {},
+    prometheusMetrics = null,
   } = options;
 
   const now = new Date().toISOString();
@@ -52,6 +62,13 @@ export function generateTestReport(data, options) {
   const time = now.split('T')[1].slice(0, 5).replace(':', '');
   const random = Math.random().toString(36).slice(2, 6);
   const runId = `${testType}-${date}-${time}-${random}`;
+
+  // Helper to calculate accuracy delta percentage
+  function calculateAccuracyDelta(calculated, actual) {
+    if (!actual || actual === 0) return null;
+    const delta = ((calculated - actual) / actual) * 100;
+    return Math.round(delta * 100) / 100; // Round to 2 decimal places
+  }
 
   // Extract metrics from k6 data
   const metrics = {
@@ -84,6 +101,17 @@ export function generateTestReport(data, options) {
       failed: getMetric(data, 'batches_failed', 'count') || 0,
       avgCompletionTimeMs: getMetric(data, 'batch_completion_duration', 'avg') || 0,
     },
+    // Actual vs Calculated comparison (when Prometheus metrics available)
+    accuracy: prometheusMetrics ? {
+      k6CalculatedThroughput: getMetric(data, 'batch_throughput_per_sec', 'avg') || getMetric(data, 'http_reqs', 'rate'),
+      actualThroughput: prometheusMetrics.realThroughput || prometheusMetrics.emailsSentRate1m || 0,
+      emailsSentDelta: prometheusMetrics.emailsSentDelta || 0,
+      prometheusAvailable: prometheusMetrics.prometheusAvailable || false,
+      accuracyDelta: calculateAccuracyDelta(
+        getMetric(data, 'batch_throughput_per_sec', 'avg') || getMetric(data, 'http_reqs', 'rate'),
+        prometheusMetrics.realThroughput || prometheusMetrics.emailsSentRate1m || 0
+      ),
+    } : null,
   };
 
   // Evaluate thresholds
@@ -122,6 +150,21 @@ export function generateTestReport(data, options) {
       evidence: `p50: ${metrics.latency.p50}ms, p95: ${metrics.latency.p95}ms`,
       recommendation: 'Profile hot paths and consider scaling',
     });
+  }
+
+  // Check accuracy delta (k6 vs Prometheus throughput)
+  if (metrics.accuracy && metrics.accuracy.accuracyDelta !== null) {
+    const absDelta = Math.abs(metrics.accuracy.accuracyDelta);
+    if (absDelta > 50) {
+      issues.push({
+        severity: 'medium',
+        category: 'measurement',
+        title: 'Large throughput measurement discrepancy',
+        description: `k6 calculated throughput differs from Prometheus by ${metrics.accuracy.accuracyDelta.toFixed(1)}%`,
+        evidence: `k6: ${metrics.accuracy.k6CalculatedThroughput.toFixed(1)}/sec, Prometheus: ${metrics.accuracy.actualThroughput.toFixed(1)}/sec`,
+        recommendation: 'k6 throughput includes polling overhead - use Prometheus metrics for accurate reporting',
+      });
+    }
   }
 
   // Determine status
@@ -218,6 +261,16 @@ function generateNarrative(name, status, metrics, issues, thresholds) {
 
   if (metrics.batches) {
     lines.push(`**Batches**: ${metrics.batches.completed}/${metrics.batches.total} completed`);
+  }
+
+  // Add accuracy comparison if Prometheus metrics available
+  if (metrics.accuracy && metrics.accuracy.prometheusAvailable) {
+    lines.push('');
+    lines.push('### Throughput Accuracy (k6 vs Prometheus)');
+    lines.push(`- k6 Calculated: ${metrics.accuracy.k6CalculatedThroughput.toFixed(1)}/sec`);
+    lines.push(`- Prometheus Actual: ${metrics.accuracy.actualThroughput.toFixed(1)}/sec`);
+    lines.push(`- Delta: ${metrics.accuracy.accuracyDelta?.toFixed(1) || 'N/A'}%`);
+    lines.push(`- Emails Sent: ${metrics.accuracy.emailsSentDelta}`);
   }
 
   if (issues.length > 0) {

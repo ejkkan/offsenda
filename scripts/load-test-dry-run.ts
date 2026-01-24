@@ -2,17 +2,52 @@
 /**
  * Load test: 100k dry run against production
  *
+ * This script runs a load test batch and monitors progress. It uses server
+ * timestamps for accurate throughput calculation. Optionally, if ADMIN_SECRET
+ * is provided, it also queries the /api/metrics/summary endpoint to get
+ * real-time Prometheus metrics for comparison.
+ *
  * Usage: API_KEY=your_key npx tsx scripts/load-test-dry-run.ts
+ *
+ * Optional: ADMIN_SECRET=secret for Prometheus metrics comparison
  */
 
 const API_URL = process.env.API_URL || "https://api.valuekeys.io";
 const API_KEY = process.env.API_KEY;
+const ADMIN_SECRET = process.env.ADMIN_SECRET;
 const BATCH_SIZE = parseInt(process.env.BATCH_SIZE || "100000", 10);
 
 if (!API_KEY) {
   console.error("Error: API_KEY environment variable required");
   console.error("Usage: API_KEY=your_key npx tsx scripts/load-test-dry-run.ts");
   process.exit(1);
+}
+
+interface MetricsSummary {
+  emailsSentTotal: number;
+  emailsSentRate1m: number;
+  emailsSentRate5m: number;
+  queueDepth: number;
+  batchesInProgress: number;
+  timestamp: string;
+  source: "prometheus" | "local";
+}
+
+async function getMetricsSummary(): Promise<MetricsSummary | null> {
+  if (!ADMIN_SECRET) return null;
+
+  try {
+    const response = await fetch(`${API_URL}/api/metrics/summary`, {
+      headers: {
+        "X-Admin-Secret": ADMIN_SECRET,
+      },
+    });
+
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  }
 }
 
 function generateRecipients(count: number) {
@@ -91,41 +126,71 @@ async function getBatchStatus(batchId: string) {
 
 async function monitorProgress(batchId: string, totalRecipients: number) {
   console.log(`\nMonitoring progress...`);
+  if (ADMIN_SECRET) {
+    console.log(`(Prometheus metrics available via ADMIN_SECRET)`);
+  }
   console.log(`─────────────────────────────────────────`);
 
-  const start = Date.now();
+  const pollStart = Date.now();
   let lastSent = 0;
-  let lastTime = start;
+  let lastTime = pollStart;
+
+  // Capture starting metrics for delta calculation
+  const startMetrics = await getMetricsSummary();
+  const startEmailsSent = startMetrics?.emailsSentTotal || 0;
 
   while (true) {
     const batch = await getBatchStatus(batchId);
     const now = Date.now();
-    const elapsed = (now - start) / 1000;
+    const pollElapsed = (now - pollStart) / 1000;
     const sentDelta = batch.sentCount - lastSent;
     const timeDelta = (now - lastTime) / 1000;
-    const currentRate = timeDelta > 0 ? sentDelta / timeDelta : 0;
-    const overallRate = elapsed > 0 ? batch.sentCount / elapsed : 0;
     const pct = ((batch.sentCount / totalRecipients) * 100).toFixed(1);
 
     const bar = "█".repeat(Math.floor(batch.sentCount / totalRecipients * 30)) +
                 "░".repeat(30 - Math.floor(batch.sentCount / totalRecipients * 30));
 
-    process.stdout.write(`\r[${bar}] ${pct}% | ${batch.sentCount.toLocaleString()}/${totalRecipients.toLocaleString()} | ${currentRate.toFixed(0)}/s (avg: ${overallRate.toFixed(0)}/s) | ${batch.status}  `);
+    process.stdout.write(`\r[${bar}] ${pct}% | ${batch.sentCount.toLocaleString()}/${totalRecipients.toLocaleString()} | ${batch.status}  `);
 
     lastSent = batch.sentCount;
     lastTime = now;
 
     if (batch.status === "completed" || batch.status === "failed") {
+      // Calculate ACTUAL throughput from batch timestamps (server-side truth)
+      const startedAt = new Date(batch.startedAt).getTime();
+      const completedAt = new Date(batch.completedAt).getTime();
+      const actualProcessingTime = (completedAt - startedAt) / 1000;
+      const actualThroughput = actualProcessingTime > 0 ? batch.sentCount / actualProcessingTime : 0;
+
       console.log(`\n─────────────────────────────────────────`);
       console.log(`\n✓ Batch ${batch.status}`);
-      console.log(`  Total time: ${elapsed.toFixed(2)}s`);
-      console.log(`  Throughput: ${overallRate.toFixed(2)} emails/sec`);
+      console.log(`  Processing time: ${actualProcessingTime.toFixed(2)}s (from server timestamps)`);
+      console.log(`  Throughput: ${actualThroughput.toFixed(2)} emails/sec`);
       console.log(`  Sent: ${batch.sentCount.toLocaleString()}`);
       console.log(`  Failed: ${batch.failedCount.toLocaleString()}`);
+      console.log(`  Wall clock time: ${pollElapsed.toFixed(2)}s (includes polling overhead)`);
+
+      // If Prometheus metrics available, show comparison
+      const endMetrics = await getMetricsSummary();
+      if (endMetrics && startMetrics) {
+        const emailsDelta = endMetrics.emailsSentTotal - startEmailsSent;
+        console.log(`\n─── Prometheus Metrics ───`);
+        console.log(`  Prometheus source: ${endMetrics.source}`);
+        console.log(`  Prometheus rate (1m): ${endMetrics.emailsSentRate1m.toFixed(2)} emails/sec`);
+        console.log(`  Prometheus rate (5m): ${endMetrics.emailsSentRate5m.toFixed(2)} emails/sec`);
+        console.log(`  Emails sent delta: ${emailsDelta.toLocaleString()}`);
+
+        // Calculate accuracy delta
+        if (endMetrics.emailsSentRate1m > 0) {
+          const accuracyDelta = ((actualThroughput - endMetrics.emailsSentRate1m) / endMetrics.emailsSentRate1m) * 100;
+          console.log(`  Accuracy delta: ${accuracyDelta.toFixed(1)}% (server timestamps vs Prometheus)`);
+        }
+      }
+
       return batch;
     }
 
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 500)); // Poll faster for better UX
   }
 }
 

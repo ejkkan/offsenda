@@ -1018,6 +1018,31 @@ export async function registerApi(
   app.get("/api/metrics", metricsHandler);
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // METRICS SUMMARY ENDPOINT (for k6 tests)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // GET /api/metrics/summary - JSON metrics summary for k6 and external tools
+  // Protected by admin secret to prevent public access
+  app.get("/api/metrics/summary", async (request, reply) => {
+    const { config } = await import("./config.js");
+
+    // Verify admin secret
+    const adminSecret = request.headers["x-admin-secret"];
+    if (adminSecret !== config.TEST_ADMIN_SECRET) {
+      return reply.status(401).send({ error: "Unauthorized - admin secret required" });
+    }
+
+    try {
+      const { getMetricsSummary } = await import("./metrics-summary.js");
+      const summary = await getMetricsSummary();
+      return reply.send(summary);
+    } catch (error) {
+      log.api.error({ error: (error as Error).message }, "Failed to get metrics summary");
+      return reply.status(500).send({ error: "Failed to get metrics summary" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // DETAILED HEALTH ENDPOINT
   // ═══════════════════════════════════════════════════════════════════════════
 
