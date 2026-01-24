@@ -1585,7 +1585,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1638,7 +1638,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(nats_emails_enqueued_total) - sum(nats_emails_processed_total) or vector(0)",
               "refId": "A"
@@ -1650,7 +1650,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1695,7 +1695,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(nats_emails_enqueued_total) or vector(0)",
               "instant": true,
@@ -1708,7 +1708,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1753,7 +1753,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(nats_emails_processed_total{status=\\\"success\\\"}) or vector(0)",
               "instant": true,
@@ -1766,7 +1766,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1815,7 +1815,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(nats_emails_processed_total{status=\\\"failed\\\"}) or vector(0)",
               "refId": "A"
@@ -1827,7 +1827,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -1908,7 +1908,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(rate(nats_emails_enqueued_total[1m]))",
               "legendFormat": "Enqueued",
@@ -1917,7 +1917,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(rate(nats_emails_processed_total[1m]))",
               "legendFormat": "Processed",
@@ -1930,7 +1930,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2016,7 +2016,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(nats_emails_enqueued_total) - sum(nats_emails_processed_total)",
               "legendFormat": "Queue Backlog",
@@ -2042,7 +2042,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2093,7 +2093,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(rate(emails_sent_total[1m])) by (provider)",
               "legendFormat": "{{provider}}",
@@ -2106,7 +2106,7 @@ data:
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "PBFA97CFB590B2093"
           },
           "fieldConfig": {
             "defaults": {
@@ -2155,7 +2155,7 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus"
+                "uid": "PBFA97CFB590B2093"
               },
               "expr": "sum(emails_sent_total) by (provider)",
               "legendFormat": "{{provider}}",
