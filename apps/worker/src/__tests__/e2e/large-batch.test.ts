@@ -47,6 +47,7 @@ describe("E2E: Large Batch Processing", () => {
       textContent: "Hello {{name}}!",
       recipients: generateRecipients(BATCH_SIZE),
       autoSend: true,
+      dryRun: true,
     });
 
     console.log(`Created batch ${batchId} with ${BATCH_SIZE} recipients`);
@@ -84,6 +85,7 @@ describe("E2E: Large Batch Processing", () => {
       htmlContent: "<p>Test</p>",
       recipients: generateRecipients(BATCH_SIZE),
       autoSend: true,
+      dryRun: true,
     });
 
     console.log(`Created batch ${batchId} with ${BATCH_SIZE} recipients`);
@@ -153,6 +155,7 @@ describe("E2E: Large Batch Processing", () => {
       fromEmail: "test@batchsender.local",
       recipients: generateRecipients(BATCH_SIZE),
       autoSend: true,
+      dryRun: true,
     });
 
     // Wait a moment for batch to be queued
@@ -182,7 +185,7 @@ describe("E2E: Large Batch Processing", () => {
     const BATCH_SIZE = 5000;
     const CHUNK_SIZE = 1000;
 
-    // Create batch metadata first
+    // Create batch metadata first (with dryRun since we're bypassing API)
     const batchData = {
       id: require("crypto").randomUUID(),
       userId: testUserId,
@@ -198,6 +201,7 @@ describe("E2E: Large Batch Processing", () => {
       deliveredCount: 0,
       bouncedCount: 0,
       failedCount: 0,
+      dryRun: true, // Required when bypassing API
     };
 
     await db.insert(batches).values(batchData);
@@ -222,11 +226,9 @@ describe("E2E: Large Batch Processing", () => {
     const insertTime = Date.now() - start;
     console.log(`Inserted ${BATCH_SIZE} recipients in ${insertTime}ms`);
 
-    // Mark as queued
-    await db
-      .update(batches)
-      .set({ status: "queued" })
-      .where(eq(batches.id, batchData.id));
+    // Use API to send batch (this properly enqueues it in NATS)
+    const { sendBatch } = await import("../../../test/helpers.js");
+    await sendBatch(batchData.id);
 
     // Wait for processing
     await waitFor(

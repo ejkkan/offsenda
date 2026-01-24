@@ -587,6 +587,25 @@ export async function registerApi(
       }
 
       // ═══════════════════════════════════════════════════════════════════════
+      // TEST API KEY SAFETY
+      // ═══════════════════════════════════════════════════════════════════════
+      // API keys starting with 'bsk_test_' force dry-run mode to prevent
+      // accidentally sending real emails/SMS during tests (like Stripe's test keys)
+
+      const authHeader = request.headers.authorization;
+      const apiKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      const isTestKey = apiKey.startsWith("bsk_test_");
+      const forceDryRun = data.dryRun || isTestKey;
+
+      // Log when test key forces dry-run mode
+      if (isTestKey && !data.dryRun) {
+        log.api.info(
+          { userId, keyPrefix: apiKey.slice(0, 12) },
+          "test API key detected - forcing dryRun=true (no real sends)"
+        );
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
       // CREATE BATCH
       // ═══════════════════════════════════════════════════════════════════════
 
@@ -604,7 +623,7 @@ export async function registerApi(
           totalRecipients: data.recipients.length,
           status,
           scheduledAt,
-          dryRun: data.dryRun,
+          dryRun: forceDryRun,
         })
         .returning();
 
@@ -949,7 +968,6 @@ export async function registerApi(
     return reply.send({
       batches: stats.batch,
       emails: stats.email,
-      priority: stats.priority,
     });
   });
 

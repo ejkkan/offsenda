@@ -188,24 +188,28 @@ describe("E2E: Dry Run Mode", () => {
     console.log(`Dry run batch of ${recipientCount} completed in ${duration}ms`);
   });
 
-  it("should handle dryRun: false (default behavior)", async () => {
-    // Create batch without dryRun flag (should default to false)
+  it("should force dryRun: true when using test API keys (bsk_test_*)", async () => {
+    // TEST API KEY SAFETY: API keys starting with 'bsk_test_' always force dryRun: true
+    // This prevents accidentally sending real emails during tests - like Stripe's test vs live keys
+
+    // Create batch without dryRun flag - should still be forced to true due to test API key
     const { id: batchId, dryRun } = await createBatch({
       name: "Normal Batch",
       subject: "Normal Email",
       fromEmail: "test@batchsender.local",
       htmlContent: "<p>Hello</p>",
       recipients: [{ email: "user@test.local", name: "User" }],
-      // dryRun not specified - should default to false
+      // dryRun not specified, but will be forced to true because we're using bsk_test_* API key
     });
 
-    expect(dryRun).toBe(false);
+    // Safety: test API keys ALWAYS force dryRun: true
+    expect(dryRun).toBe(true);
 
     const batch = await db.query.batches.findFirst({
       where: eq(batches.id, batchId),
     });
 
-    expect(batch?.dryRun).toBe(false);
+    expect(batch?.dryRun).toBe(true);
   });
 
   it("should process webhook module in dry run mode", async () => {

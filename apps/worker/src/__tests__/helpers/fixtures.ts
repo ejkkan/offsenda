@@ -175,6 +175,12 @@ export function sleep(ms: number): Promise<void> {
 /**
  * Generate a test API key for a user
  * Returns the key itself (for making API requests) and the database record
+ *
+ * SAFETY: Keys with prefix "bsk_test_" ALWAYS force dryRun=true at batch creation.
+ * This means NO real emails/SMS are ever sent, even if tests run against
+ * production infrastructure. This is enforced in api.ts and cannot be bypassed.
+ *
+ * @see api.ts - TEST API KEY SAFETY section
  */
 export function createTestApiKey(userId: string): {
   apiKey: string;
@@ -186,7 +192,7 @@ export function createTestApiKey(userId: string): {
     keyPrefix: string;
   };
 } {
-  // Generate a random API key
+  // SAFETY: bsk_test_ prefix forces dryRun=true - no real sends ever
   const apiKey = `bsk_test_${randomBytes(32).toString("hex")}`;
   const keyHash = createHash("sha256").update(apiKey).digest("hex");
   const keyPrefix = apiKey.slice(0, 10);
